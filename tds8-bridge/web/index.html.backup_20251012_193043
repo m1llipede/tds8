@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>TDS-8 Control</title>
+<style>
+:root{--brand:#ff8800;--brand2:#8a2be2;--text:#222;--muted:#666;--card:#fff;--bg:#f6f7fb;--hover:#f0f1f5}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);font:14px/1.3 system-ui,Segoe UI,Roboto;color:var(--text);overflow:hidden}
+.wrap{max-width:100%;height:100vh;display:flex;flex-direction:column;padding:12px}
+.main-grid{display:grid;grid-template-columns:1fr 380px;gap:12px;flex:1;min-height:0}
+.left-col{display:flex;flex-direction:column;gap:12px;overflow-y:auto}
+.right-col{display:flex;flex-direction:column;min-height:0}
+.card{background:var(--card);border-radius:10px;box-shadow:0 4px 12px rgba(0,0,0,.06);overflow:hidden}
+.card.flex{display:flex;flex-direction:column;flex:1;min-height:0}
+.hdr{background:linear-gradient(135deg,var(--brand),var(--brand2));padding:12px 16px;color:#fff}
+.hdr h1{margin:0;font-size:16px;font-weight:600}
+.body{padding:16px}
+.body.flex{flex:1;min-height:0;display:flex;flex-direction:column}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid3{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+label{display:block;color:var(--text);font-size:13px;font-weight:500;margin-bottom:6px}
+.input{padding:8px 10px;border:2px solid #e3e6ef;border-radius:8px;background:#fff;width:100%;font-size:13px;transition:all .2s}
+.input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 2px rgba(255,136,0,.1)}
+select.input{cursor:pointer}
+.btn{appearance:none;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;font-weight:500;transition:all .2s;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.btn:hover{transform:translateY(-1px);box-shadow:0 3px 8px rgba(0,0,0,.12)}
+.btn:active{transform:translateY(0)}
+.btn.primary{background:var(--brand);color:#fff}
+.btn.primary:hover{background:#ff9920}
+.btn.secondary{background:var(--brand2);color:#fff}
+.btn.secondary:hover{background:#9b3bf3}
+.btn.ghost{background:#fff;border:2px solid #e3e6ef;color:var(--text)}
+.btn.ghost:hover{background:var(--hover);border-color:#d0d3df}
+.btn.ghost.active{background:var(--brand);color:#fff;border-color:var(--brand)}
+.btn.sm{padding:6px 10px;font-size:12px}
+.btn-group{display:flex;gap:8px;flex-wrap:wrap}
+.device-list{display:flex;flex-direction:column;gap:6px}
+.device-item{background:#fafbff;border:2px solid #e3e6ef;border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;transition:all .2s}
+.device-item:hover{border-color:var(--brand);background:#fff}
+.device-item.connected{border-color:var(--brand);background:#fff8f0}
+.device-name{font-weight:600;font-size:14px;color:var(--text)}
+.device-status{font-size:11px;color:#10b981;margin-top:2px}
+.trackgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.trackrow{display:flex;gap:8px;align-items:center}
+.trackrow label{margin:0;min-width:60px;font-weight:600;font-size:12px;color:var(--text)}
+.trackrow .input{padding:6px 8px;font-size:12px}
+.icon-card{text-align:center;padding:20px 16px;cursor:pointer;transition:all .2s;border-radius:8px;border:2px solid transparent}
+.icon-card:hover{background:var(--hover);border-color:#e3e6ef;transform:translateY(-1px)}
+.icon-card .icon{font-size:36px;margin-bottom:8px}
+.icon-card h3{margin:0 0 4px;font-size:14px;font-weight:600}
+.icon-card p{margin:0;font-size:11px;color:var(--muted);line-height:1.3}
+.log{font-family:ui-monospace,Menlo,Consolas,monospace;background:#fafbff;color:var(--text);border:2px solid #e3e6ef;border-radius:8px;padding:12px;overflow:auto;font-size:11px;line-height:1.5;flex:1;min-height:0}
+.log-line{margin:1px 0}
+.log-line.out{color:#10b981}
+.log-line.err{color:#ef4444}
+.divider{height:1px;background:#e3e6ef;margin:12px 0}
+.notice{background:#fef3c7;border:2px solid #fbbf24;border-radius:8px;padding:10px 12px;font-size:12px;color:#92400e;margin-bottom:12px}
+.network-item{display:flex;justify-content:space-between;align-items:center;padding:12px;background:#fafbff;border-bottom:1px solid #e3e6ef;transition:all .2s;cursor:pointer}
+.network-item:hover{background:#fff}
+.network-item:last-child{border-bottom:none}
+.network-item .name{font-weight:500;font-size:14px;color:var(--text)}
+.network-item .icon{font-size:20px;color:var(--muted)}
+.network-item.saved .name{color:#e91e63}
+.network-item.saved .icon{color:#e91e63}
+.footer-info{text-align:center;padding:16px;background:#fafbff;border-top:1px solid #e3e6ef;font-size:11px;color:var(--muted)}
+.footer-info .company{font-weight:600;color:var(--text);margin-bottom:4px}
+.footer-info .serial{font-family:ui-monospace,monospace}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="main-grid">
+      <!-- Left Column -->
+      <div class="left-col">
+        
+        <!-- Devices -->
+        <div class="card">
+          <div class="hdr"><h1>🎛️ TDS-8 Devices</h1></div>
+          <div class="body">
+            <div id="deviceList" class="device-list">
+              <div style="text-align:center;padding:12px;color:var(--muted);font-size:12px">
+                Scanning for devices...
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Track Names -->
+        <div class="card">
+          <div class="hdr"><h1>🎵 Track Names</h1></div>
+          <div class="body">
+            <div class="trackgrid" id="tracks"></div>
+            <div class="divider"></div>
+            <div class="btn-group">
+              <button id="btnReadTracks" class="btn secondary sm">Read Current Tracks</button>
+              <button id="btnSendAll" class="btn primary sm">Update All Tracks</button>
+              <button id="btnResetTracks" class="btn ghost sm">Reset to Defaults</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Settings -->
+        <div class="card">
+          <div class="hdr"><h1>⚙️ Settings</h1></div>
+          <div class="body">
+            <div class="grid3">
+              <div class="icon-card" id="cardWifi">
+                <div class="icon">📡</div>
+                <h3>Wi-Fi</h3>
+                <p>Connect to network</p>
+              </div>
+              <div class="icon-card" id="cardFirmware">
+                <div class="icon">⬇️</div>
+                <h3>Firmware</h3>
+                <p>Update software</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Right Column - Serial Monitor -->
+      <div class="right-col">
+        <div class="card flex">
+          <div class="hdr"><h1>📟 Serial Monitor</h1></div>
+          <div class="body flex">
+            <div id="log" class="log"></div>
+            <div style="margin-top:10px;display:flex;gap:8px">
+              <input id="cmd" class="input" placeholder="Send command..." style="flex:1;font-size:12px;padding:6px 8px"/>
+              <button id="btnSend" class="btn ghost sm">Send</button>
+              <button id="btnClear" class="btn ghost sm">Clear</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    
+    <!-- Footer -->
+    <div class="footer-info">
+      <div class="company">PlayOptix, LLC</div>
+      <div class="serial" id="footerSerial">Serial Number: Loading...</div>
+    </div>
+  </div>
+
+  <!-- Wi-Fi Modal -->
+  <div id="modalWifi" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:1000;padding:20px;overflow:auto">
+    <div style="max-width:600px;margin:60px auto;background:white;border-radius:10px;overflow:hidden">
+      <div class="hdr"><h1>📡 Wi-Fi Settings</h1></div>
+      <div class="body" style="padding:0">
+        <div style="padding:16px">
+          <div class="notice">
+            ⚠️ Connecting to Wi-Fi will disable wired mode. Device will switch to wireless communication.
+          </div>
+          
+          <div style="margin-bottom:12px">
+            <label style="padding:0 0 8px 0">Add New Network</label>
+            <div style="font-size:12px;color:var(--muted);margin-bottom:12px">
+              <span style="color:#e91e63;font-weight:600">MANUALLY ADD NETWORK</span> ... Or choose a network from the list below.
+            </div>
+          </div>
+        </div>
+        
+        <div id="networkList" style="max-height:300px;overflow-y:auto">
+          <!-- Networks will be inserted here -->
+        </div>
+        
+        <div style="padding:16px;border-top:1px solid #e3e6ef">
+          <div class="btn-group">
+            <button id="btnAddNetwork" class="btn primary">Add Network</button>
+            <button id="btnCloseWifi" class="btn ghost">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Network Modal -->
+  <div id="modalAddNetwork" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:1001;padding:20px;overflow:auto">
+    <div style="max-width:450px;margin:80px auto;background:white;border-radius:10px;overflow:hidden">
+      <div class="hdr"><h1>➕ Add Network</h1></div>
+      <div class="body">
+        <label>Network Name (SSID)</label>
+        <input id="ssidInput" class="input" placeholder="Enter network name" style="margin-bottom:12px"/>
+        
+        <label>Password</label>
+        <input id="pwd" class="input" type="password" placeholder="Enter password" style="margin-bottom:16px"/>
+        
+        <div class="btn-group">
+          <button id="btnSaveNetwork" class="btn primary">Save & Connect</button>
+          <button id="btnCancelAdd" class="btn ghost">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firmware Modal -->
+  <div id="modalFirmware" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:1000;padding:20px;overflow:auto">
+    <div style="max-width:500px;margin:60px auto;background:white;border-radius:10px;overflow:hidden">
+      <div class="hdr"><h1>⬇️ Firmware Updates</h1></div>
+      <div class="body">
+        <div id="firmwareStatus" style="text-align:center;padding:20px">
+          <div style="font-size:48px;margin-bottom:12px">🔍</div>
+          <p style="color:var(--muted);font-size:13px">Click Check for Updates to begin</p>
+        </div>
+        
+        <div class="btn-group" style="justify-content:center">
+          <button id="btnCheck" class="btn primary">Check for Updates</button>
+          <button id="btnOta" class="btn secondary" style="display:none">Install Update</button>
+          <button id="btnCloseFirmware" class="btn ghost">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const $ = s => document.querySelector(s);
+const logEl = $('#log');
+let connectedDevices = new Map();
+let currentDevice = null;
+let deviceCounter = 0;
+let savedWifiNetworks = [];
+let deviceSerialNumber = 'Unknown';
+
+// Load saved networks from localStorage
+function loadSavedNetworks() {
+  const saved = localStorage.getItem('tds8_wifi_networks');
+  if (saved) {
+    try {
+      savedWifiNetworks = JSON.parse(saved);
+    } catch (e) {
+      savedWifiNetworks = [];
+    }
+  }
+}
+
+function saveSavedNetworks() {
+  localStorage.setItem('tds8_wifi_networks', JSON.stringify(savedWifiNetworks));
+}
+
+function log(msg, type = 'info') {
+  const line = document.createElement('div');
+  line.className = 'log-line ' + type;
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function updateFooterSerial(serialNum) {
+  deviceSerialNumber = serialNum || 'Unknown';
+  $('#footerSerial').textContent = `Serial Number: ${deviceSerialNumber}`;
+}
+
+// ----- Device Management -----
+async function scanDevices() {
+  const res = await fetch('/api/ports');
+  const ports = await res.json();
+  const list = $('#deviceList');
+  list.innerHTML = '';
+  
+  if (!Array.isArray(ports) || ports.length === 0) {
+    list.innerHTML = '<div style="text-align:center;padding:12px;color:var(--muted);font-size:12px">No TDS-8 devices found. Please connect via USB.</div>';
+    updateFooterSerial(null);
+    return;
+  }
+  
+  ports.forEach((p, idx) => {
+    const item = document.createElement('div');
+    item.className = 'device-item';
+    const isConnected = connectedDevices.has(p.path);
+    if (isConnected) item.classList.add('connected');
+    
+    const deviceNum = idx + 1;
+    const deviceName = `TDS-8 #${deviceNum}`;
+    
+    // Show just "TDS-8" when connected, with "Connected via USB" status
+    const displayName = isConnected ? 'TDS-8' : deviceName;
+    const statusText = isConnected ? '<div class="device-status">Connected via USB</div>' : '';
+    
+    // Update footer with serial number if connected
+    if (isConnected && p.serialNumber) {
+      updateFooterSerial(p.serialNumber);
+    }
+    
+    item.innerHTML = `
+      <div>
+        <div class="device-name">${displayName}</div>
+        ${statusText}
+      </div>
+      <button class="btn sm ${isConnected ? 'ghost active' : 'primary'}" data-path="${p.path}" data-name="${deviceName}">
+        ${isConnected ? 'Connected' : 'Connect'}
+      </button>
+    `;
+    
+    const btn = item.querySelector('button');
+    btn.onclick = () => isConnected ? disconnect(p.path) : connect(p.path, deviceName, p.serialNumber);
+    list.appendChild(item);
+  });
+}
+
+async function connect(path, name, serialNum) {
+  const res = await fetch('/api/connect', { 
+    method:'POST', 
+    headers:{'Content-Type':'application/json'}, 
+    body: JSON.stringify({ path }) 
+  });
+  const j = await res.json();
+  if (j.ok) {
+    connectedDevices.set(path, { name, path, serialNum });
+    currentDevice = path;
+    updateFooterSerial(serialNum);
+    log(`✓ Connected to ${name}`, 'out');
+    scanDevices();
+  } else {
+    log(`✗ Connection failed: ${j.error}`, 'err');
+  }
+}
+
+function disconnect(path) {
+  connectedDevices.delete(path);
+  if (currentDevice === path) {
+    currentDevice = null;
+    updateFooterSerial(null);
+  }
+  log(`Disconnected from device`, 'info');
+  scanDevices();
+}
+
+// ----- Track Names -----
+const defaultTracks = [
+  'Track 1', 'Track 2', 'Track 3', 'Track 4',
+  'Track 5', 'Track 6', 'Track 7', 'Track 8'
+];
+
+function buildTrackGrid() {
+  const host = $('#tracks');
+  host.innerHTML = '';
+  for (let i = 0; i < 8; i++) {
+    const row = document.createElement('div');
+    row.className = 'trackrow';
+    
+    const label = document.createElement('label');
+    label.textContent = `Track ${i + 1}`;
+    
+    const input = document.createElement('input');
+    input.className = 'input';
+    input.id = 'tname' + i;
+    input.value = defaultTracks[i];
+    input.placeholder = defaultTracks[i];
+    
+    row.appendChild(label);
+    row.appendChild(input);
+    host.appendChild(row);
+  }
+}
+
+$('#btnReadTracks').onclick = async () => {
+  if (!currentDevice) {
+    log('✗ Please connect a device first', 'err');
+    return;
+  }
+  
+  log('📖 Reading current track names from device...', 'info');
+  await fetch('/api/tracknames');
+  log('✓ Track names requested (watch serial monitor for response)', 'out');
+};
+
+$('#btnResetTracks').onclick = () => {
+  for (let i = 0; i < 8; i++) {
+    $('#tname' + i).value = defaultTracks[i];
+  }
+  log('Reset to default track names', 'info');
+};
+
+$('#btnSendAll').onclick = async () => {
+  if (!currentDevice) {
+    log('✗ Please connect a device first', 'err');
+    return;
+  }
+  
+  let count = 0;
+  for (let i = 0; i < 8; i++) {
+    const name = ($('#tname' + i).value || '').trim();
+    if (name) {
+      await fetch('/api/trackname', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ index: i, name })
+      });
+      count++;
+    }
+  }
+  log(`✓ Updated ${count} track names`, 'out');
+};
+
+// ----- Modals -----
+$('#cardWifi').onclick = () => {
+  $('#modalWifi').style.display = 'block';
+  displayNetworkList();
+};
+$('#btnCloseWifi').onclick = () => $('#modalWifi').style.display = 'none';
+
+$('#btnAddNetwork').onclick = () => {
+  $('#modalAddNetwork').style.display = 'block';
+};
+$('#btnCancelAdd').onclick = () => $('#modalAddNetwork').style.display = 'none';
+
+$('#cardFirmware').onclick = () => {
+  $('#modalFirmware').style.display = 'block';
+};
+$('#btnCloseFirmware').onclick = () => $('#modalFirmware').style.display = 'none';
+
+// ----- Wi-Fi -----
+function displayNetworkList() {
+  const container = $('#networkList');
+  container.innerHTML = '';
+  
+  // Show saved networks first
+  savedWifiNetworks.forEach((network, idx) => {
+    const item = document.createElement('div');
+    item.className = 'network-item saved';
+    item.innerHTML = `
+      <div class="name">📡 ${network.ssid}</div>
+      <div class="icon">✓</div>
+    `;
+    item.onclick = () => connectToNetwork(network.ssid, network.password);
+    container.appendChild(item);
+  });
+  
+  // Add placeholder if no networks
+  if (savedWifiNetworks.length === 0) {
+    const placeholder = document.createElement('div');
+    placeholder.style.padding = '20px';
+    placeholder.style.textAlign = 'center';
+    placeholder.style.color = 'var(--muted)';
+    placeholder.style.fontSize = '12px';
+    placeholder.textContent = 'No saved networks. Click "Add Network" to add one.';
+    container.appendChild(placeholder);
+  }
+}
+
+async function connectToNetwork(ssid, password) {
+  const r = await fetch('/api/wifi-join', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ ssid, password })
+  });
+  
+  const j = await r.json();
+  if (j.ok) {
+    log(`✓ Connecting to "${ssid}"... (wired mode disabled)`, 'out');
+    $('#modalWifi').style.display = 'none';
+  } else {
+    log(`✗ Failed to join network: ${j.error}`, 'err');
+  }
+}
+
+$('#btnSaveNetwork').onclick = async () => {
+  const ssid = $('#ssidInput').value.trim();
+  const password = $('#pwd').value;
+  
+  if (!ssid) {
+    log('✗ Please enter a network name', 'err');
+    return;
+  }
+  
+  // Check if already saved
+  const existing = savedWifiNetworks.findIndex(n => n.ssid === ssid);
+  if (existing >= 0) {
+    // Update password
+    savedWifiNetworks[existing].password = password;
+  } else {
+    // Add new
+    savedWifiNetworks.push({ ssid, password });
+  }
+  
+  saveSavedNetworks();
+  log(`✓ Saved network: ${ssid}`, 'out');
+  
+  // Connect to it
+  await connectToNetwork(ssid, password);
+  
+  // Clear inputs and close
+  $('#ssidInput').value = '';
+  $('#pwd').value = '';
+  $('#modalAddNetwork').style.display = 'none';
+  
+  displayNetworkList();
+};
+
+// ----- Firmware -----
+const MANIFEST_URL = 'https://raw.githubusercontent.com/m1llipede/tds8/main/manifest.json';
+
+$('#btnCheck').onclick = async () => {
+  if (!currentDevice) {
+    const status = $('#firmwareStatus');
+    status.innerHTML = `
+      <div style="font-size:48px;margin-bottom:12px">⚠️</div>
+      <h3 style="margin:0 0 8px;color:var(--text);font-size:15px">No Device Connected</h3>
+      <p style="color:var(--muted);margin:0;font-size:12px">Please connect a TDS-8 device first</p>
+    `;
+    log('✗ Please connect a device before checking for updates', 'err');
+    return;
+  }
+  
+  const status = $('#firmwareStatus');
+  status.innerHTML = '<div style="font-size:48px;margin-bottom:12px">⏳</div><p style="color:var(--muted);font-size:13px">Checking for updates...</p>';
+  
+  try {
+    const url = new URL('/api/ota-check', window.location.origin);
+    url.searchParams.set('manifest', MANIFEST_URL);
+    
+    const res = await fetch(url);
+    const j = await res.json();
+    
+    if (j.ok) {
+      const deviceVer = j.deviceVersion || 'Unknown';
+      const latestVer = j.manifest.version;
+      const isNewer = j.isNewer;
+      
+      if (isNewer) {
+        status.innerHTML = `
+          <div style="font-size:48px;margin-bottom:12px">🎉</div>
+          <h3 style="margin:0 0 8px;color:var(--text);font-size:15px">Update Available!</h3>
+          <p style="color:var(--muted);margin:0;font-size:12px">Current: ${deviceVer} → New: ${latestVer}</p>
+        `;
+        $('#btnOta').style.display = 'inline-flex';
+        log(`Update available: ${latestVer}`, 'info');
+      } else {
+        status.innerHTML = `
+          <div style="font-size:48px;margin-bottom:12px">✅</div>
+          <h3 style="margin:0 0 8px;color:var(--text);font-size:15px">Up to Date</h3>
+          <p style="color:var(--muted);margin:0;font-size:12px">Version ${deviceVer}</p>
+        `;
+        $('#btnOta').style.display = 'none';
+        log(`Firmware is up to date (${deviceVer})`, 'info');
+      }
+    } else {
+      status.innerHTML = `
+        <div style="font-size:48px;margin-bottom:12px">⚠️</div>
+        <h3 style="margin:0 0 8px;color:var(--text);font-size:15px">Check Failed</h3>
+        <p style="color:var(--muted);margin:0;font-size:12px">${j.error}</p>
+      `;
+      log(`✗ Update check failed: ${j.error}`, 'err');
+    }
+  } catch (err) {
+    const errorMsg = err.message.includes('404') 
+      ? 'Firmware manifest not found. The update file may not exist yet at the GitHub repository.'
+      : 'Could not reach update server. Check your internet connection.';
+    
+    status.innerHTML = `
+      <div style="font-size:48px;margin-bottom:12px">⚠️</div>
+      <h3 style="margin:0 0 8px;color:var(--text);font-size:15px">Connection Error</h3>
+      <p style="color:var(--muted);margin:0;font-size:12px">${errorMsg}</p>
+    `;
+    log(`✗ Network error: ${err.message}`, 'err');
+  }
+};
+
+$('#btnOta').onclick = async () => {
+  if (!confirm('Start firmware update? Device will switch to Wi-Fi mode and update.')) return;
+  
+  const status = $('#firmwareStatus');
+  status.innerHTML = '<div style="font-size:48px;margin-bottom:12px">⬇️</div><p style="color:var(--muted);font-size:13px">Starting update...</p>';
+  
+  const res = await fetch('/api/ota-update', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ manifest: MANIFEST_URL })
+  });
+  
+  const j = await res.json();
+  if (j.ok) {
+    status.innerHTML = '<div style="font-size:48px;margin-bottom:12px">✅</div><p style="color:#10b981;font-size:13px">Update started! Device will reboot when complete.</p>';
+    log('✓ Firmware update started', 'out');
+  } else {
+    status.innerHTML = `<div style="font-size:48px;margin-bottom:12px">⚠️</div><p style="color:#ef4444;font-size:13px">Update failed: ${j.error}</p>`;
+    log(`✗ Update failed: ${j.error}`, 'err');
+  }
+};
+
+// ----- Commands -----
+async function sendCmd(cmd) {
+  cmd = (cmd || '').trim();
+  if (!cmd) return;
+  
+  const res = await fetch('/api/send', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ cmd })
+  });
+  
+  const j = await res.json();
+  if (j.ok) log(`→ ${cmd}`, 'out');
+  else log(`✗ Send error: ${j.error}`, 'err');
+}
+
+$('#btnSend').onclick = () => {
+  sendCmd($('#cmd').value);
+  $('#cmd').value = '';
+};
+
+$('#cmd').onkeypress = (e) => {
+  if (e.key === 'Enter') {
+    sendCmd($('#cmd').value);
+    $('#cmd').value = '';
+  }
+};
+
+$('#btnClear').onclick = () => {
+  logEl.innerHTML = '';
+  log('Serial monitor cleared', 'info');
+};
+
+// ----- WebSocket -----
+(() => {
+  const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
+  ws.onmessage = ev => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'serial-data') {
+      const lines = msg.data.split('\n');
+      lines.forEach(line => {
+        if (line.trim()) log(line, 'info');
+      });
+    }
+    if (msg.type === 'serial-open') {
+      log(`✓ Serial port opened: ${msg.path}`, 'out');
+      scanDevices();
+    }
+    if (msg.type === 'serial-error') log(`✗ Serial error: ${msg.message}`, 'err');
+    if (msg.type === 'device-version') log(`Device version: ${msg.version}`, 'info');
+  };
+  ws.onerror = () => log('✗ WebSocket connection error', 'err');
+  ws.onclose = () => log('WebSocket disconnected', 'info');
+})();
+
+// ----- Init -----
+loadSavedNetworks();
+buildTrackGrid();
+scanDevices();
+setInterval(scanDevices, 5000);
+log('TDS-8 Control ready', 'info');
+</script>
+</body>
+</html>

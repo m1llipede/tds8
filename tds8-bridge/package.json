@@ -1,0 +1,74 @@
+{
+  "name": "tds8-bridge",
+  "version": "0.3.0",
+  "description": "Desktop bridge for TDS-8 (ESP32-C3): USB serial relay + local web UI + OTA helper",
+  "main": "electron-main.js",
+  "bin": {
+    "tds8-bridge": "index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "electron": "pkill -9 -f \"electron.*tds8-bridge\" 2>/dev/null || true; lsof -ti:8088 | xargs kill -9 2>/dev/null || true; sleep 0.5 && electron .",
+    "electron-dev": "NODE_ENV=development electron .",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:all": "electron-builder --mac --win",
+    "pkg": "pkg . --targets node20-win-x64,node20-macos-x64,node20-macos-arm64 --compress Brotli"
+  },
+  "dependencies": {
+    "@serialport/bindings-cpp": "^12.0.0",
+    "@serialport/list": "^12.0.0",
+    "@serialport/stream": "^12.0.0",
+    "express": "^4.19.2",
+    "morgan": "^1.10.0",
+    "osc": "^2.4.5",
+    "ws": "^8.17.1"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1"
+  },
+  "build": {
+    "appId": "com.tds8.bridge",
+    "productName": "TDS-8",
+    "files": [
+      "**/*",
+      "!dist",
+      "!.git",
+      "!*.md",
+      "!.DS_Store"
+    ],
+    "mac": {
+      "category": "public.app-category.music",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "web/icon.icns"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "web/icon.ico"
+    },
+    "dmg": {
+      "title": "TDS-8 Control",
+      "icon": "web/icon.icns"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "pkg": {
+    "assets": [
+      "web/**/*",
+      "node_modules/@serialport/**/build/Release/*",
+      "node_modules/@serialport/**/prebuilds/**/*"
+    ],
+    "outputPath": "dist"
+  }
+}

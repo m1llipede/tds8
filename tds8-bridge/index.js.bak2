@@ -1,0 +1,170 @@
+#!/usr/bin/env node
+// TDS-8 Desktop Bridge — comm toggle (wired|wifi), Wi-Fi scan (Windows), batch tracks, firmware feed + manifest
+
+const path = require('path');
+const fs = require('fs');
+const express = require('express');
+const morgan = require('morgan');
+const http = require('http');
+const WebSocket = require('ws');
+const { exec } = require('child_process');
+const { SerialPortStream } = require('@serialport/stream');
+const { autoDetect } = require('@serialport/bindings-cpp');
+
+const PORT = process.env.PORT || 8088;
+const BAUD = parseInt(process.env.BAUD || '115200', 10);
+
+// Optional defaults (you can set these later)
+const OTA_MANIFEST_URL = process.env.OTA_MANIFEST_URL || '';
+const FW_FEED_URL = process.env.FW_FEED_URL || '';
+
+const Bindings = autoDetect();
+let serial = null;
+let serialPath = null;
+let serialBuf = '';
+let deviceVersion = null;
+
+const app = express();
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
+
+app.use(express.json({ limit: '10mb' }));
+app.use(morgan('dev'));
+app.use(express.static(path.join(__dirname, 'web')));
+
+function wsBroadcast(obj) {
+  const s = JSON.stringify(obj);
+  for (const c of wss.clients) if (c.readyState === 1) c.send(s);
+}
+
+// -------- Serial helpers --------
+async function listPorts() {
+  try { return await Bindings.list(); }
+  catch { return []; }
+}
+
+async function openSerial(desiredPath) {
+  if (serial && serial.isOpen && desiredPath && desiredPath !== serialPath) {
+    try { serial.close(); } catch {}
+    serial = null; serialPath = null;
+  }
+  if (serial && serial.isOpen) return serial.path;
+  if (!desiredPath) throw new Error('No port specified. Select a serial port first.');
+
+  serialPath = desiredPath;
+  serial = new SerialPortStream({
+    binding: Bindings, path: desiredPath, baudRate: BAUD, autoOpen: false
+  });
+  await new Promise((res, rej) => serial.open(err => err ? rej(err) : res()));
+
+  serial.on('data', onSerialData);
+  serial.on('error', e => wsBroadcast({ type: 'serial-error', message: e.message }));
+  serial.on('close', () => wsBroadcast({ type: 'serial-close', path: serialPath }));
+
+  wsBroadcast({ type: 'serial-open', path: serialPath, baud: BAUD });
+  send('/reannounce\n'); send('VERSION\n');
+  return serialPath;
+}
+
+function send(s) {
+  if (!serial || !serial.isOpen) throw new Error('Serial not open');
+  serial.write(s);
+}
+
+function onSerialData(chunk) {
+  const text = chunk.toString('utf8');
+  serialBuf += text;
+  wsBroadcast({ type: 'serial-data', data: text });
+  let idx;
+  while ((idx = serialBuf.indexOf('\n')) >= 0) {
+    const line = serialBuf.slice(0, idx).trim();
+    serialBuf = serialBuf.slice(idx + 1);
+    const m = /^VERSION\s*[:=]\s*([\w.\-]+)/i.exec(line);
+    if (m) { deviceVersion = m[1]; wsBroadcast({ type: 'device-version', version: deviceVersion }); }
+  }
+}
+
+// -------- API --------
+app.get('/api/ports', async (_req, res) => {
+  const ports = await listPorts();
+  // Filter for TDS-8 devices (XIAO ESP32-C3 only)
+  const tds8Devices = ports.filter(p => {
+    const vid = (p.vendorId || '').toUpperCase();
+    const pid = (p.productId || '').toUpperCase();
+    // Only show XIAO ESP32-C3 devices
+    return vid === '303A' && pid === '1001';
+  });
+  
+  const decorated = tds8Devices.map(p => {
+    return {
+      path: p.path,
+      label: p.path, // Just the path for the label
+      vendorId: p.vendorId || '',
+      productId: p.productId || '',
+      serialNumber: p.serialNumber || '',
+      manufacturer: p.manufacturer || '',
+      pnpId: p.pnpId || ''
+    };
+  });
+  res.json(decorated);
+});
+
+app.post('/api/connect', async (req, res) => {
+  try {
+    const desired = req.body && req.body.path;
+    if (!desired) throw new Error('Missing path');
+    const p = await openSerial(desired);
+    res.json({ ok: true, path: p, baud: BAUD });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/send', (req, res) => {
+  try {
+    let cmd = (req.body && req.body.cmd) ? String(req.body.cmd) : '';
+    cmd = cmd.trim();
+    if (!cmd) throw new Error('Missing cmd');
+    send(cmd.endsWith('\n') ? cmd : cmd + '\n');
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Communication toggle
+app.post('/api/comm-mode', (req, res) => {
+  try {
+    const mode = String((req.body && req.body.mode) || '').toLowerCase();
+    if (!['wired','wifi'].includes(mode)) throw new Error('mode must be wired or wifi');
+    if (mode === 'wired') send('WIRED_ONLY true\n');
+    else { send('WIRED_ONLY false\n'); send('WIFI_ON\n'); }
+    res.json({ ok: true, mode });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Wi-Fi join + Windows scan
+app.post('/api/wifi-join', (req, res) => {
+  try {
+    const { ssid, password } = req.body || {};
+    if (!ssid) throw new Error('Missing ssid');
+    const esc = s => '"' + String(s).replace(/"/g, '\\"') + '"';
+    send(`WIFI_JOIN ${esc(ssid)} ${esc(password || '')}\n`);
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/api/wifi-scan', (_req, res) => {
+  exec('netsh wlan show networks mode=Bssid', { windowsHide: true }, (err, stdout) => {
+    if (err) { res.status(500).json({ error: err.message }); return; }
+    const ssids = [];
+    stdout.split(/\r?\n/).forEach(line => {
+      const m = line.match(/^\s*SSID\s+\d+\s*:\s*(.+)$/i);
+      if (m) { const name = m[1].trim(); if (name && !ssids.includes(name)) ssids.push(name); }
+    });
+    res.json({ ok: true, ssids });
+  });
+});
+
+// Tracks and active track
+app.get('/api/tracknames', (req, res) => {
+  try {
+    res.json({ ok: true, names: currentTrackNames });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
