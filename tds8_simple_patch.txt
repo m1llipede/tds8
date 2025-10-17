@@ -1,0 +1,373 @@
+----------begin_max5_patcher----------
+{
+	"patcher" : {
+		"fileversion" : 1,
+		"appversion" : {
+			"major" : 9,
+			"minor" : 0,
+			"revision" : 0
+		},
+		"boxes" : [
+			{
+				"box" : {
+					"id" : "obj-1",
+					"maxclass" : "comment",
+					"text" : "TDS-8 Automated Track Display - Simplified Version",
+					"patching_rect" : [ 10.0, 10.0, 400.0, 20.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-offset",
+					"maxclass" : "number",
+					"parameter_enable" : 0,
+					"patching_rect" : [ 50.0, 50.0, 50.0, 22.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-2",
+					"maxclass" : "comment",
+					"text" : "Track Offset (0, 8, 16, 24...)",
+					"patching_rect" : [ 110.0, 50.0, 200.0, 20.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-refresh",
+					"maxclass" : "button",
+					"parameter_enable" : 0,
+					"patching_rect" : [ 50.0, 100.0, 60.0, 60.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-3",
+					"maxclass" : "comment",
+					"text" : "Click to Refresh All Tracks",
+					"patching_rect" : [ 120.0, 120.0, 200.0, 20.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-trigger1",
+					"maxclass" : "newobj",
+					"text" : "t b b",
+					"patching_rect" : [ 50.0, 180.0, 35.0, 22.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-zero",
+					"maxclass" : "message",
+					"text" : "0",
+					"patching_rect" : [ 100.0, 180.0, 20.0, 22.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-uzi",
+					"maxclass" : "newobj",
+					"text" : "uzi 8 0",
+					"patching_rect" : [ 50.0, 220.0, 70.0, 22.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-4",
+					"maxclass" : "comment",
+					"text" : "Loop 8 times (for 8 displays)",
+					"patching_rect" : [ 130.0, 220.0, 200.0, 20.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-unpack1",
+					"maxclass" : "newobj",
+					"text" : "unpack i i",
+					"patching_rect" : [ 50.0, 260.0, 70.0, 22.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-trigger2",
+					"maxclass" : "newobj",
+					"text" : "t i i i",
+					"patching_rect" : [ 50.0, 300.0, 100.0, 22.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-add",
+					"maxclass" : "newobj",
+					"text" : "+",
+					"patching_rect" : [ 130.0, 350.0, 50.0, 22.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-5",
+					"maxclass" : "comment",
+					"text" : "Add offset to get actual track number",
+					"patching_rect" : [ 190.0, 350.0, 250.0, 20.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-pack1",
+					"maxclass" : "newobj",
+					"text" : "pack path live_set visible_tracks 0",
+					"patching_rect" : [ 130.0, 390.0, 200.0, 22.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-livepath",
+					"maxclass" : "newobj",
+					"text" : "live.path",
+					"patching_rect" : [ 130.0, 430.0, 60.0, 22.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-trigger3",
+					"maxclass" : "newobj",
+					"text" : "t b l",
+					"patching_rect" : [ 130.0, 470.0, 35.0, 22.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-getname",
+					"maxclass" : "message",
+					"text" : "get name",
+					"patching_rect" : [ 130.0, 510.0, 60.0, 22.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-observer",
+					"maxclass" : "newobj",
+					"text" : "live.observer",
+					"patching_rect" : [ 130.0, 550.0, 100.0, 22.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-unpack2",
+					"maxclass" : "newobj",
+					"text" : "unpack s s",
+					"patching_rect" : [ 130.0, 590.0, 70.0, 22.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-pack2",
+					"maxclass" : "newobj",
+					"text" : "pack i s i",
+					"patching_rect" : [ 50.0, 640.0, 200.0, 22.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-6",
+					"maxclass" : "comment",
+					"text" : "Pack: display_index, track_name, actual_track_number",
+					"patching_rect" : [ 260.0, 640.0, 350.0, 20.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-prepend",
+					"maxclass" : "newobj",
+					"text" : "prepend /trackname",
+					"patching_rect" : [ 50.0, 680.0, 120.0, 22.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-udpsend",
+					"maxclass" : "newobj",
+					"text" : "udpsend 127.0.0.1 8000",
+					"patching_rect" : [ 50.0, 720.0, 150.0, 22.0 ]
+				}
+			},
+			{
+				"box" : {
+					"id" : "obj-print",
+					"maxclass" : "newobj",
+					"text" : "print OSC_OUT",
+					"patching_rect" : [ 50.0, 760.0, 100.0, 22.0 ]
+				}
+			}
+		],
+		"lines" : [
+			{
+				"patchline" : {
+					"source" : [ "obj-refresh", 0 ],
+					"destination" : [ "obj-trigger1", 0 ]
+				}
+			},
+			{
+				"patchline" : {
+					"source" : [ "obj-trigger1", 0 ],
+					"destination" : [ "obj-uzi", 0 ]
+				}
+			},
+			{
+				"patchline" : {
+					"source" : [ "obj-trigger1", 1 ],
+					"destination" : [ "obj-zero", 0 ]
+				}
+			},
+			{
+				"patchline" : {
+					"source" : [ "obj-zero", 0 ],
+					"destination" : [ "obj-uzi", 1 ]
+				}
+			},
+			{
+				"patchline" : {
+					"source" : [ "obj-uzi", 0 ],
+					"destination" : [ "obj-unpack1", 0 ]
+				}
+			},
+			{
+				"patchline" : {
+					"source" : [ "obj-unpack1", 0 ],
+					"destination" : [ "obj-trigger2", 0 ]
+				}
+			},
+			{
+				"patchline" : {
+					"source" : [ "obj-trigger2", 0 ],
+					"destination" : [ "obj-pack2", 0 ]
+				}
+			},
+			{
+				"patchline" : {
+					"source" : [ "obj-trigger2", 1 ],
+					"destination" : [ "obj-add", 0 ]
+				}
+			},
+			{
+				"patchline" : {
+					"source" : [ "obj-offset", 0 ],
+					"destination" : [ "obj-add", 1 ]
+				}
+			},
+			{
+				"patchline" : {
+					"source" : [ "obj-add", 0 ],
+					"destination" : [ "obj-pack1", 0 ]
+				}
+			},
+			{
+				"patchline" : {
+					"source" : [ "obj-add", 0 ],
+					"destination" : [ "obj-pack2", 2 ]
+				}
+			},
+			{
+				"patchline" : {
+					"source" : [ "obj-pack1", 0 ],
+					"destination" : [ "obj-livepath", 0 ]
+				}
+			},
+			{
+				"patchline" : {
+					"source" : [ "obj-livepath", 1 ],
+					"destination" : [ "obj-trigger3", 0 ]
+				}
+			},
+			{
+				"patchline" : {
+					"source" : [ "obj-trigger3", 0 ],
+					"destination" : [ "obj-getname", 0 ]
+				}
+			},
+			{
+				"patchline" : {
+					"source" : [ "obj-trigger3", 1 ],
+					"destination" : [ "obj-observer", 1 ]
+				}
+			},
+			{
+				"patchline" : {
+					"source" : [ "obj-getname", 0 ],
+					"destination" : [ "obj-observer", 0 ]
+				}
+			},
+			{
+				"patchline" : {
+					"source" : [ "obj-observer", 0 ],
+					"destination" : [ "obj-unpack2", 0 ]
+				}
+			},
+			{
+				"patchline" : {
+					"source" : [ "obj-unpack2", 1 ],
+					"destination" : [ "obj-pack2", 1 ]
+				}
+			},
+			{
+				"patchline" : {
+					"source" : [ "obj-pack2", 0 ],
+					"destination" : [ "obj-prepend", 0 ]
+				}
+			},
+			{
+				"patchline" : {
+					"source" : [ "obj-prepend", 0 ],
+					"destination" : [ "obj-udpsend", 0 ]
+				}
+			},
+			{
+				"patchline" : {
+					"source" : [ "obj-prepend", 0 ],
+					"destination" : [ "obj-print", 0 ]
+				}
+			}
+		]
+	}
+}
+----------end_max5_patcher----------
+
+INSTRUCTIONS TO USE THIS PATCH:
+================================
+
+1. Copy everything between the "begin" and "end" lines (including those lines)
+2. In Max, create a new patcher (Cmd+N)
+3. Unlock the patcher (Cmd+E)
+4. Select all objects (Cmd+A) and delete them
+5. Paste the copied text (Cmd+V)
+6. Save as "tds8_auto.maxpat"
+
+OR SIMPLER METHOD:
+==================
+
+1. Create new M4L Audio Effect in Ableton
+2. Click "Edit" to open Max
+3. In Max menu: File → Import → Max Text Format
+4. Paste the text between begin/end lines
+5. Click OK
+
+This creates a basic automated patch that:
+- Has an offset number box (0, 8, 16, 24...)
+- Has a refresh button
+- Loops through 8 tracks starting at offset
+- Gets each track name from Live
+- Sends: /trackname <display_index> <track_name> <actual_track_number>
+- Prints to Max console for debugging
+
+NEXT STEPS:
+===========
+
+1. Test with offset = 0 (should send tracks 0-7)
+2. Test with offset = 8 (should send tracks 8-15)
+3. Add active track monitoring (use your existing subpatcher)
+4. Add presentation mode UI
+5. Integrate with your existing device
+
+NOTE: This is a simplified teaching version. Your existing patch has more
+features (active track monitoring, etc.) that you should keep!

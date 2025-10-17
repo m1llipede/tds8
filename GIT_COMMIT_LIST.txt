@@ -1,0 +1,97 @@
+FILES CHANGED - Ready to Push to Repo
+======================================
+
+ARDUINO FIRMWARE (v0.33)
+-------------------------
+✅ OLED33/OLED33.ino
+   - Version 0.33 (2025.10.17-handshake)
+   - Ableton handshake support (/ableton_on, /ableton_off)
+   - Heartbeat indicator on OLED 8
+   - Fixed track name parsing (handles spaces)
+   - Better text wrapping algorithm
+   - Forces wired mode on boot
+   - Skips WiFi instructions in wired mode
+   - Keeps logo displayed until track names arrive
+
+BRIDGE BACKEND
+--------------
+✅ tds8-bridge/index.js
+   - OSC handshake system (/hello → /hi)
+   - sendOSC() function for Ableton communication
+   - Better console logging (Sent/Received)
+   - OSC sender/listener initialization
+
+BRIDGE FRONTEND
+----------------
+✅ tds8-bridge/web/index.html
+   - Device connection check for Refresh button
+   - Clearer error messages
+   - Increased window height for UI
+   - Removed OSC from browser log (PowerShell only)
+
+PACKAGE CONFIGURATION
+---------------------
+✅ tds8-bridge/package.json
+   - Version bump to 0.4.0
+   - Removed Electron dependencies
+   - Updated description (browser-based)
+   - Cleaner scripts section
+
+STARTUP SCRIPTS
+---------------
+✅ tds8-bridge/start_tds8.bat (UPDATED)
+   - Browser-based startup
+   - Auto-opens http://localhost:8088
+   - Removed Electron fallback
+
+✅ tds8-bridge/start_tds8.sh (NEW)
+   - Mac/Linux startup script
+   - Cross-platform browser launch
+   - Automatic port cleanup
+
+DOCUMENTATION
+-------------
+✅ tds8-bridge/README_BROWSER.md (NEW)
+   - Browser-based setup guide
+   - Cross-platform instructions
+   - Remote access documentation
+
+✅ M4L_HANDSHAKE_INSTRUCTIONS.txt (NEW)
+   - How to implement M4L handshake
+   - Port configuration
+   - Testing instructions
+
+SUGGESTED COMMIT MESSAGE
+========================
+
+Title:
+------
+v0.33 & v0.4.0: Ableton Handshake, Browser-Based Bridge, Wired Mode Fix
+
+Description:
+------------
+Arduino Firmware v0.33:
+- Added Ableton connection handshake with heartbeat indicator
+- Fixed track name parsing to handle spaces correctly
+- Improved text wrapping algorithm (character-based)
+- Forces wired mode on boot, skips WiFi instructions
+- Keeps PlayOptix logo visible on OLED 8 until track names arrive
+
+Bridge v0.4.0:
+- Switched from Electron to browser-based UI
+- Implemented OSC handshake system (/hello → /hi)
+- Added connection status tracking with 15s timeout
+- Cleaner console logging (Sent/Received prefixes)
+- Cross-platform startup scripts (Windows/Mac/Linux)
+- Device connection check for Refresh button
+
+Breaking Changes:
+- Removed Electron support (use browser instead)
+- OSC messages only in PowerShell console, not browser UI
+
+COMMAND TO PUSH
+===============
+cd C:\Users\brian\Documents\TDS-8
+git add .
+git commit -m "v0.33 & v0.4.0: Ableton Handshake, Browser-Based Bridge, Wired Mode Fix"
+git push origin main

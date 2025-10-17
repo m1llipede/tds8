@@ -13,6 +13,7 @@ const { SerialPortStream } = require('@serialport/stream');
 const { autoDetect } = require('@serialport/bindings-cpp');
 
 const PORT = process.env.PORT || 8088;
+const OSC_LISTEN_PORT = parseInt(process.env.OSC_LISTEN_PORT || '8000', 10);
 const BAUD = parseInt(process.env.BAUD || '115200', 10);
 
 // Optional defaults (you can set these later)
@@ -41,13 +42,38 @@ function initOSC() {
                 broadcast: true,
                 metadata: true
             });
+            
+            udpPort.on("ready", () => {
+                console.log("📡 OSC Sender: Ready on port 9001 (sends to Ableton on 127.0.0.1:9000)");
+            });
+            
+            udpPort.on("error", (err) => {
+                console.error("❌ OSC Sender error:", err.message);
+            });
+            
             udpPort.open();
-            console.log("📡 OSC Sender: 0.0.0.0:9001 (sends to M4L on port 9000)");
         } catch (err) {
-            console.error("OSC init error:", err.message);
+            console.error("❌ OSC init error:", err.message);
         }
     }
     return udpPort;
+}
+
+// Send OSC message to Ableton
+function sendOSC(address, args = []) {
+    const port = initOSC();
+    if (port) {
+        try {
+            port.send({
+                address: address,
+                args: args
+            }, "127.0.0.1", 9000);
+            const argsStr = args.length > 0 ? ' [' + args.map(a => a.value || a).join(', ') + ']' : '';
+            console.log(`Sent to Ableton: ${address}${argsStr}`);
+        } catch (err) {
+            console.error(`OSC send error (${address}):`, err.message);
+        }
+    }
 }
 
 
@@ -59,36 +85,93 @@ function initOSCListener() {
         try {
             oscListener = new osc.UDPPort({
                 localAddress: "0.0.0.0",
-                localPort: 8000,
+                localPort: OSC_LISTEN_PORT,
                 metadata: true
             });
+            
+            // Simple handshake: send /hello, expect /hi back
+            let abletonConnected = false;
+            let lastHelloResponse = 0;
+            
+            // Function to check connection and send hello
+            const checkConnection = () => {
+                // Send /hello
+                console.log('>>> Handshake check...');
+                sendOSC('/hello', []);
+                
+                // Check if we got /hi in last 15 seconds
+                const now = Date.now();
+                const wasConnected = abletonConnected;
+                abletonConnected = (now - lastHelloResponse) < 15000;
+                
+                if (wasConnected !== abletonConnected) {
+                    console.log(`${abletonConnected ? '✓ Ableton CONNECTED' : '✗ Ableton DISCONNECTED'}`);
+                    try {
+                        if (serial && serial.isOpen) {
+                            const cmd = abletonConnected ? '/ableton_on\n' : '/ableton_off\n';
+                            send(cmd);
+                        }
+                    } catch (err) {
+                        console.error('Error sending Ableton status:', err);
+                    }
+                }
+            };
+            
+            // Send first hello immediately after 2 seconds
+            setTimeout(() => {
+                console.log('🔔 Starting Ableton handshake...');
+                checkConnection();
+            }, 2000);
+            
+            // Then send /hello every 10 seconds
+            setInterval(checkConnection, 10000);
             
             oscListener.on("message", (oscMsg, timeTag, info) => {
                 const fromIP = info.address || 'unknown';
                 const fromPort = info.port || 'unknown';
-                console.log(`📨 OSC from ${fromIP}:${fromPort} → ${oscMsg.address}`, oscMsg.args);
+                
+                // Format args for display
+                const argsStr = oscMsg.args && oscMsg.args.length > 0 
+                    ? oscMsg.args.map(a => a.value).join(', ') 
+                    : '';
+                console.log(`Received: ${oscMsg.address}${argsStr ? ' [' + argsStr + ']' : ''}`);
+                
                 wsBroadcast({ type: 'osc-received', from: `${fromIP}:${fromPort}`, address: oscMsg.address, args: oscMsg.args });
+                
+                // Handle /hi response to our /hello
+                if (oscMsg.address === "/hi") {
+                    lastHelloResponse = Date.now();
+                    if (!abletonConnected) {
+                        abletonConnected = true;
+                        console.log('✓ Ableton CONNECTED');
+                        try {
+                            if (serial && serial.isOpen) send('/ableton_on\n');
+                        } catch (err) {}
+                    }
+                    return;
+                }
                 
                 // Forward OSC commands to device via serial
                 if (oscMsg.address === "/trackname" && oscMsg.args.length >= 2) {
-                    const index = oscMsg.args[0].value;
-                    const name = oscMsg.args[1].value;
-                    const cmd = `/trackname ${index} ${name}\n`;
+                    const displayIndex = oscMsg.args[0].value;
+                    const nameRaw = oscMsg.args[1].value;
+                    const actualTrack = oscMsg.args.length >= 3 ? oscMsg.args[2].value : displayIndex;
+
+                    const esc = String(nameRaw).replace(/"/g, '\\"');
+                    const cmd = `/trackname ${displayIndex} "${esc}" ${actualTrack}\n`;
                     send(cmd);
-                    console.log(`✓ Forwarded to serial: ${cmd.trim()}`);
-                    // Store in memory
-                    if (index >= 0 && index < 8) currentTrackNames[index] = name;
+
+                    // Store the UNESCAPED name for UI/API (not the escaped version)
+                    if (displayIndex >= 0 && displayIndex < 8) {
+                        currentTrackNames[displayIndex] = String(nameRaw);
+                    }
                 }
                 else if (oscMsg.address === "/activetrack" && oscMsg.args.length >= 1) {
                     const index = oscMsg.args[0].value;
-                    const cmd = `/activetrack ${index}\n`;
-                    send(cmd);
-                    console.log(`✓ Forwarded to serial: ${cmd.trim()}`);
+                    send(`/activetrack ${index}\n`);
                 }
                 else if (oscMsg.address === "/ping") {
-                    const cmd = `/ping\n`;
-                    send(cmd);
-                    console.log(`✓ Forwarded to serial: ${cmd.trim()}`);
+                    send(`/ping\n`);
                 }
             });
             
@@ -96,8 +179,11 @@ function initOSCListener() {
                 console.error("OSC listener error:", err.message);
             });
             
+            oscListener.on("ready", () => {
+                console.log(`🎧 OSC Listener: Ready on port ${OSC_LISTEN_PORT} (receives from Ableton)`);
+            });
+            
             oscListener.open();
-            console.log("🎧 OSC Listener: 0.0.0.0:8000 (receiving from M4L)");
         } catch (err) {
             console.error("OSC listener init error:", err.message);
         }
@@ -105,8 +191,11 @@ function initOSCListener() {
     return oscListener;
 }
 
-// Start OSC listener immediately
-initOSCListener();
+// Start OSC sender and listener immediately
+console.log('\n========== OSC INITIALIZATION ==========');
+initOSC();        // Initialize OSC sender
+initOSCListener(); // Initialize OSC listener
+console.log('========================================\n');
 // Function to broadcast IP update to M4L (port 9000)
 function broadcastIPUpdate() {
     try {
@@ -127,6 +216,11 @@ function broadcastIPUpdate() {
 app.use(express.json({ limit: '10mb' }));
 app.use(morgan('dev'));
 app.use(express.static(path.join(__dirname, 'web')));
+
+// Explicit root route handler as fallback
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'web', 'index.html'));
+});
 
 function wsBroadcast(obj) {
   const s = JSON.stringify(obj);
@@ -166,7 +260,7 @@ async function openSerial(desiredPath) {
 function send(s) {
   if (!serial || !serial.isOpen) throw new Error('Serial not open');
   serial.write(s);
-  console.log(`📤 Serial TX: ${s.trim()}`);
+  console.log(`Sent: ${s.trim()}`);
 }
 
 function onSerialData(chunk) {
@@ -186,25 +280,31 @@ function onSerialData(chunk) {
 // -------- API --------
 app.get('/api/ports', async (_req, res) => {
   const ports = await listPorts();
+  console.log('🔍 All serial ports found:', ports.map(p => ({
+    path: p.path,
+    vid: p.vendorId,
+    pid: p.productId,
+    manufacturer: p.manufacturer
+  })));
+  
   // Filter for TDS-8 devices (XIAO ESP32-C3 only)
   const tds8Devices = ports.filter(p => {
     const vid = (p.vendorId || '').toUpperCase();
     const pid = (p.productId || '').toUpperCase();
-    // Only show XIAO ESP32-C3 devices
     return vid === '303A' && pid === '1001';
   });
   
-  const decorated = tds8Devices.map(p => {
-    return {
-      path: p.path,
-      label: p.path, // Just the path for the label
-      vendorId: p.vendorId || '',
-      productId: p.productId || '',
-      serialNumber: p.serialNumber || '',
-      manufacturer: p.manufacturer || '',
-      pnpId: p.pnpId || ''
-    };
-  });
+  console.log(`✓ Filtered devices (VID=303A, PID=1001): ${tds8Devices.length} found`);
+  
+  const decorated = tds8Devices.map(p => ({
+    path: p.path,
+    label: p.path,
+    vendorId: p.vendorId || '',
+    productId: p.productId || '',
+    serialNumber: p.serialNumber || '',
+    manufacturer: p.manufacturer || '',
+    pnpId: p.pnpId || ''
+  }));
   res.json(decorated);
 });
 
@@ -217,6 +317,29 @@ app.post('/api/connect', async (req, res) => {
     setTimeout(() => broadcastIPUpdate(), 500);
     res.json({ ok: true, path: p, baud: BAUD });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/disconnect', async (req, res) => {
+  try {
+    if (serial && serial.isOpen) {
+      await new Promise((resolve, reject) => {
+        serial.close(err => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+      serial = null;
+      serialPath = null;
+      console.log('🔌 Serial port closed - Available for Arduino IDE');
+      wsBroadcast({ type: 'serial-close', path: null });
+      res.json({ ok: true, message: 'Serial port released' });
+    } else {
+      res.json({ ok: true, message: 'No active connection' });
+    }
+  } catch (e) { 
+    console.error('Disconnect error:', e);
+    res.status(500).json({ error: e.message }); 
+  }
 });
 
 app.post('/api/send', (req, res) => {
@@ -307,20 +430,52 @@ app.get('/tracks', (_req, res) => {
 // Tracks and active track
 app.get('/api/tracknames', (req, res) => {
   try {
-    res.json({ ok: true, names: currentTrackNames });
+    const names = (currentTrackNames || []).map(n => {
+      if (typeof n === 'string') return n;
+      if (n && typeof n.name === 'string') return n.name;
+      return '';
+    });
+    res.json({ ok: true, names });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 app.post('/api/trackname', (req, res) => {
   try {
-    const { index, name } = req.body || {};
+    const { index, name, actualTrack } = req.body || {};
+    
+    // Debug: log exactly what we received
+    console.log('🔍 [DEBUG] Received trackname request:', {
+      index,
+      name,
+      nameType: typeof name,
+      nameLength: name ? name.length : 0,
+      actualTrack
+    });
+    
     if (index === undefined || `${index}`.trim() === '') throw new Error('Missing index');
-    if (!name || !String(name).trim()) throw new Error('Missing name');
-    if (index >= 0 && index < 8) currentTrackNames[index] = name;
-    send(`/trackname ${index} ${name}
-`);
+    // Allow empty string name to clear display; only require the field to be present
+    if (name === undefined) throw new Error('Missing name');
+    if (index >= 0 && index < 8) currentTrackNames[index] = String(name);
+    
+    // Build safe, quoted name and always include actualTrack (device adds +1, so default to index)
+    const esc = String(name).replace(/"/g, '\\"');
+    const at = (actualTrack !== undefined) ? actualTrack : Number(index);
+    const cmd = `/trackname ${index} "${esc}" ${at}\n`;
+    
+    console.log('📤 [DEBUG] Command parts:', {
+      index,
+      originalName: name,
+      escapedName: esc,
+      actualTrack: at,
+      fullCommand: cmd.trim()
+    });
+    
+    send(cmd);
     res.json({ ok: true });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { 
+    console.error('❌ /api/trackname error:', e);
+    res.status(400).json({ error: e.message }); 
+  }
 });
 app.post('/api/activetrack', (req, res) => {
   try {
@@ -329,6 +484,36 @@ app.post('/api/activetrack', (req, res) => {
     send(`/activetrack ${index}\n`);
     res.json({ ok: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Send arbitrary OSC message to M4L
+app.post('/api/osc-send', (req, res) => {
+  try {
+    const { address, args } = req.body || {};
+    if (!address) throw new Error('Missing OSC address');
+    
+    const port = initOSC();
+    if (!port) throw new Error('OSC not initialized');
+    
+    // Build OSC message
+    const oscMsg = {
+      address: address,
+      args: args && Array.isArray(args) ? args.map(arg => ({
+        type: typeof arg === 'number' ? (Number.isInteger(arg) ? 'i' : 'f') : 's',
+        value: arg
+      })) : []
+    };
+    
+    port.send(oscMsg, "127.0.0.1", 9000);
+    const logMessage = `📡 OSC sent to M4L: ${address} ${args ? args.join(' ') : ''}`;
+    console.log(logMessage);
+    wsBroadcast({ type: 'log', level: 'info', message: logMessage });
+    
+    res.json({ ok: true, message: `Sent ${address} to M4L` });
+  } catch (e) { 
+    console.error('OSC send error:', e.message);
+    res.status(400).json({ ok: false, error: e.message }); 
+  }
 });
 
 // Broadcast IP update to M4L
@@ -423,15 +608,15 @@ wss.on('connection', ws => {
 });
 
 server.listen(PORT, () => {
-  console.log('\n╔════════════════════════════════════════════════════════╗');
-  console.log('║           TDS-8 Bridge - Port Configuration           ║');
-  console.log('╠════════════════════════════════════════════════════════╣');
-  console.log(`║  HTTP Server:    http://localhost:${PORT}                  ║`);
-  console.log('║  OSC Listener:   0.0.0.0:8000 (receives from M4L)     ║');
-  console.log('║  OSC Sender:     127.0.0.1:9001 → 127.0.0.1:9000      ║');
-  console.log('║  WebSocket:      ws://localhost:8088                   ║');
-  console.log('╠════════════════════════════════════════════════════════╣');
-  console.log('║  M4L should send OSC to: 127.0.0.1:8000               ║');
-  console.log('║  M4L should listen on:   port 9000                    ║');
-  console.log('╚════════════════════════════════════════════════════════╝\n');
+  console.log('\n========================================================');
+  console.log('         TDS-8 Bridge - Port Configuration');
+  console.log('========================================================');
+  console.log(`  HTTP Server:    http://localhost:${PORT}`);
+  console.log('  OSC Listener:   0.0.0.0:8000 (receives from M4L)');
+  console.log('  OSC Sender:     127.0.0.1:9001 -> 127.0.0.1:9000');
+  console.log('  WebSocket:      ws://localhost:8088');
+  console.log('========================================================');
+  console.log('  M4L should send OSC to: 127.0.0.1:8000');
+  console.log('  M4L should listen on:   port 9000');
+  console.log('========================================================\n');
 });

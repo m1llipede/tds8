@@ -1,0 +1,67 @@
+{
+  "patcher": {
+    "fileversion": 1,
+    "rect": [0.0, 0.0, 900.0, 700.0],
+    "boxes": [
+      {"box": {"id":"refresh","maxclass":"button","patching_rect":[40.0,40.0,24.0,24.0]}},
+      {"box": {"id":"trig","maxclass":"newobj","text":"t b 1","patching_rect":[40.0,80.0,50.0,20.0]}},
+      {"box": {"id":"tog","maxclass":"toggle","patching_rect":[110.0,80.0,24.0,24.0]}},
+      {"box": {"id":"metro","maxclass":"newobj","text":"metro 75","patching_rect":[150.0,80.0,65.0,20.0]}},
+      {"box": {"id":"counter","maxclass":"newobj","text":"counter 0 7","patching_rect":[230.0,80.0,80.0,20.0]}},
+      {"box": {"id":"stop0","maxclass":"message","text":"0","patching_rect":[330.0,80.0,25.0,20.0]}},
+
+      {"box": {"id":"offsetLbl","maxclass":"comment","text":"Offset","patching_rect":[460.0,40.0,60.0,20.0]}},
+      {"box": {"id":"offset","maxclass":"number","patching_rect":[460.0,60.0,60.0,22.0]}},
+      {"box": {"id":"sum","maxclass":"newobj","text":"+","patching_rect":[460.0,100.0,30.0,20.0]}},
+
+      {"box": {"id":"pathmsg","maxclass":"message","text":"path live_set visible_tracks $1","patching_rect":[520.0,100.0,200.0,20.0]}},
+      {"box": {"id":"lpath","maxclass":"newobj","text":"live.path","patching_rect":[520.0,130.0,70.0,20.0]}},
+      {"box": {"id":"tbl","maxclass":"newobj","text":"t b l","patching_rect":[520.0,160.0,50.0,20.0]}},
+      {"box": {"id":"prop","maxclass":"message","text":"property name","patching_rect":[590.0,160.0,100.0,20.0]}},
+      {"box": {"id":"lobserver","maxclass":"newobj","text":"live.observer","patching_rect":[520.0,190.0,90.0,20.0]}},
+      {"box": {"id":"defer","maxclass":"newobj","text":"deferlow","patching_rect":[520.0,220.0,70.0,20.0]}},
+      {"box": {"id":"unpack","maxclass":"newobj","text":"unpack s s","patching_rect":[520.0,250.0,80.0,20.0]}},
+
+      {"box": {"id":"pack","maxclass":"newobj","text":"pack i s i","patching_rect":[300.0,280.0,80.0,20.0]}},
+      {"box": {"id":"prepend","maxclass":"newobj","text":"prepend /trackname","patching_rect":[300.0,310.0,130.0,20.0]}},
+      {"box": {"id":"udp","maxclass":"newobj","text":"udpsend","patching_rect":[300.0,340.0,60.0,20.0]}},
+
+      {"box": {"id":"targetLbl","maxclass":"comment","text":"Target TDS-8","patching_rect":[720.0,40.0,100.0,20.0]}},
+      {"box": {"id":"umenu","maxclass":"umenu","items":["TDS-8 #1",",","TDS-8 #2",",","TDS-8 #3"],"patching_rect":[720.0,60.0,120.0,22.0]}},
+      {"box": {"id":"plus1","maxclass":"newobj","text":"+ 1","patching_rect":[720.0,90.0,35.0,20.0]}},
+      {"box": {"id":"coll","maxclass":"newobj","text":"coll TDS8_ADDRS","patching_rect":[720.0,120.0,120.0,20.0]}},
+      {"box": {"id":"collNote","maxclass":"comment","text":"Open this coll and add:\n1, host 127.0.0.1, port 8000;\n2, host 127.0.0.1, port 8001;\n3, host 127.0.0.1, port 8002;","patching_rect":[720.0,150.0,260.0,60.0]}}
+    ],
+    "lines": [
+      {"patchline": {"source":["refresh",0],"destination":["trig",0]}},
+      {"patchline": {"source":["trig",0],"destination":["counter",0]}},
+      {"patchline": {"source":["trig",1],"destination":["tog",0]}},
+      {"patchline": {"source":["tog",0],"destination":["metro",0]}},
+      {"patchline": {"source":["metro",0],"destination":["counter",1]}},
+      {"patchline": {"source":["counter",4],"destination":["stop0",0]}},
+      {"patchline": {"source":["stop0",0],"destination":["tog",0]}},
+
+      {"patchline": {"source":["counter",0],"destination":["pack",0]}},
+      {"patchline": {"source":["counter",0],"destination":["sum",0]}},
+      {"patchline": {"source":["offset",0],"destination":["sum",1]}},
+      {"patchline": {"source":["sum",0],"destination":["pathmsg",0]}},
+      {"patchline": {"source"]["pathmsg",0],"destination":["lpath",0]}},
+      {"patchline": {"source":["lpath",0],"destination":["tbl",0]}},
+      {"patchline": {"source":["lpath",1],"destination":["tbl",1]}},
+      {"patchline": {"source":["tbl",0],"destination":["prop",0]}},
+      {"patchline": {"source":["tbl",1],"destination":["lobserver",1]}},
+      {"patchline": {"source":["prop",0],"destination":["lobserver",0]}},
+      {"patchline": {"source":["lobserver",0],"destination":["defer",0]}},
+      {"patchline": {"source":["defer",0],"destination":["unpack",0]}},
+      {"patchline": {"source":["unpack",1],"destination":["pack",1]}},
+      {"patchline": {"source":["sum",0],"destination":["pack",2]}},
+
+      {"patchline": {"source":["pack",0],"destination":["prepend",0]}},
+      {"patchline": {"source":["prepend",0],"destination":["udp",0]}},
+
+      {"patchline": {"source":["umenu",0],"destination":["plus1",0]}},
+      {"patchline": {"source":["plus1",0],"destination":["coll",0]}},
+      {"patchline": {"source":["coll",0],"destination":["udp",1]}}
+    ]
+  }
+}

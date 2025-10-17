@@ -1,0 +1,48 @@
+# TDS8 Quick-Start Setup Guide
+
+A step-by-step guide for getting your ESP32-XIAO + OLED screens online, and integrating with our Max-for-Live device (`tds8.amxd`) in Ableton Live.
+
+---
+
+## 📦 Requirements
+
+- **Hardware**  
+  - ESP32-based XIAO board  
+  - SSD1306 OLED + TCA9548A I²C multiplexer (8 screens)  
+  - USB-C cable  
+
+- **Software**  
+  - Arduino IDE (with ESP32 board support)  
+  - Libraries:  
+    - **WiFiManager** v2.0.17  
+    - **ArduinoJson**  
+    - **Preferences** (built into ESP32 core)  
+    - **Adafruit_SSD1306** + **Adafruit_GFX**  
+    - **OSCMessage**  
+  - Ableton Live (10 or later) with Max for Live  
+  - `tds8.amxd` Max-for-Live device (included in project download)
+
+---
+
+## 1️⃣ Flash the Firmware
+
+1. **Install the libraries** listed above via Arduino’s Library Manager.  
+2. **Select** “ESP32 XIAO” as your board in **Tools → Board**.  
+3. **Open** the provided sketch (`OLED10.ino` or similar).  
+4. **Upload** to your XIAO.
+
+---
+
+## 2️⃣ First-Time Wi-Fi Setup (Captive Portal)
+
+On **first boot** (or after clearing settings), the XIAO will:
+
+1. **Start** an open Wi-Fi AP called **`TDS8-Setup`**.  
+2. **Run** a captive-portal on `192.168.4.1`.  
+
+### Steps
+
+- On your laptop/phone, **join** the Wi-Fi network **`TDS8-Setup`**.  
+- **Open** your web browser to **http://192.168.4.1** (it should redirect automatically).  
+- **Select** your home SSID from the dropdown, **enter** its password, and **Submit**.  
+- The XIAO will **reboot**, connect via DHCP to your network, and print in Serial Monitor:  

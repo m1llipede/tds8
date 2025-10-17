@@ -36,9 +36,9 @@ function startBridge() {
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
-    height: 900,
+    height: 1000,
     minWidth: 1200,
-    minHeight: 800,
+    minHeight: 900,
     title: 'TDS-8 Control',
     icon: path.join(__dirname, 'web', 'icon.png'),
     webPreferences: {
@@ -51,10 +51,25 @@ function createWindow() {
     show: false // Show after ready
   });
 
-  // Wait for bridge to start, then load
-  setTimeout(() => {
-    mainWindow.loadURL(`http://localhost:${BRIDGE_PORT}`);
-  }, 1500);
+  // Wait for bridge to start, then load with retry logic
+  let loadAttempts = 0;
+  const maxAttempts = 10;
+  
+  const tryLoadURL = () => {
+    loadAttempts++;
+    mainWindow.loadURL(`http://localhost:${BRIDGE_PORT}`).catch(err => {
+      console.log(`Load attempt ${loadAttempts}/${maxAttempts} failed:`, err.message);
+      if (loadAttempts < maxAttempts) {
+        console.log('Retrying in 1 second...');
+        setTimeout(tryLoadURL, 1000);
+      } else {
+        console.error('Failed to load after maximum attempts');
+      }
+    });
+  };
+  
+  // Start first attempt after 2 seconds
+  setTimeout(tryLoadURL, 2000);
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();

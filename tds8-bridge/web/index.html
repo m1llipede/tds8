@@ -77,25 +77,45 @@ select.input{cursor:pointer}
         
         <!-- Devices -->
         <div class="card">
-          <div class="hdr"><h1>🎛️ TDS-8 Devices</h1></div>
+          <div class="hdr" style="display:flex;justify-content:space-between;align-items:center">
+            <h1>🎛️ TDS-8 Devices</h1>
+            <button id="btnRefreshDevices" class="btn ghost sm" style="background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3);padding:4px 10px;font-size:11px">🔄 Refresh</button>
+          </div>
           <div class="body">
             <div id="deviceList" class="device-list">
               <div style="text-align:center;padding:12px;color:var(--muted);font-size:12px">
                 Scanning for devices...
               </div>
             </div>
+            <div class="divider"></div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input id="manualComInput" class="input" placeholder="Enter COM port (e.g., COM5)" style="flex:1;font-size:12px;padding:6px 8px"/>
+              <button id="btnManualConnect" class="btn ghost sm">Connect COM</button>
+            </div>
           </div>
         </div>
 
         <!-- Track Names -->
-        <div class="card">
+        <div class="card" style="margin-bottom:60px">
           <div class="hdr"><h1>🎵 Track Names</h1></div>
           <div class="body">
+            <!-- Offset Controls -->
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:12px;background:#fafbff;border-radius:8px;border:2px solid #e3e6ef">
+              <button id="btnOffsetLeft" class="btn ghost sm" title="Previous 8 tracks">◀</button>
+              <div style="flex:1;text-align:center">
+                <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Track Offset</div>
+                <div style="font-size:18px;font-weight:600;color:var(--brand)" id="offsetDisplay">0</div>
+                <div style="font-size:10px;color:var(--muted);margin-top:2px">Showing tracks <span id="offsetRange">1-8</span></div>
+              </div>
+              <button id="btnOffsetRight" class="btn ghost sm" title="Next 8 tracks">▶</button>
+            </div>
+            
             <div class="trackgrid" id="tracks"></div>
             <div class="divider"></div>
-            <div class="btn-group">
+            <div class="btn-group" style="margin-bottom:8px">
+              <button id="btnRefresh" class="btn primary">🔄 Refresh from Ableton</button>
               <button id="btnReadTracks" class="btn secondary sm">Load Stored Tracks</button>
-              <button id="btnSendAll" class="btn primary sm">Update All Tracks</button>
+              <button id="btnSendAll" class="btn ghost sm">Update All Tracks</button>
               <button id="btnResetTracks" class="btn ghost sm">Reset to Defaults</button>
             </div>
           </div>
@@ -257,16 +277,18 @@ function updateFooterSerial(serialNum) {
 
 // ----- Device Management -----
 async function scanDevices() {
-  const res = await fetch('/api/ports');
-  const ports = await res.json();
-  const list = $('#deviceList');
-  list.innerHTML = '';
-  
-  if (!Array.isArray(ports) || ports.length === 0) {
-    list.innerHTML = '<div style="text-align:center;padding:12px;color:var(--muted);font-size:12px">No TDS-8 devices found. Please connect via USB.</div>';
-    updateFooterSerial(null);
-    return;
-  }
+  try {
+    const res = await fetch('/api/ports');
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    const ports = await res.json();
+    const list = $('#deviceList');
+    list.innerHTML = '';
+    
+    if (!Array.isArray(ports) || ports.length === 0) {
+      list.innerHTML = '<div style="text-align:center;padding:12px;color:var(--muted);font-size:12px">No TDS-8 devices found. Please connect via USB.<br><small style="color:#888">Try clicking Refresh or use manual COM connect below.</small></div>';
+      updateFooterSerial(null);
+      return;
+    }
   
   ports.forEach((p, idx) => {
     const item = document.createElement('div');
@@ -301,41 +323,74 @@ async function scanDevices() {
     btn.onclick = () => isConnected ? disconnect(p.path) : connect(p.path, deviceName, p.serialNumber);
     list.appendChild(item);
   });
+  } catch (err) {
+    console.error('Device scan error:', err);
+    const list = $('#deviceList');
+    list.innerHTML = `<div style="text-align:center;padding:12px;color:#ef4444;font-size:12px">⚠️ Scan failed: ${err.message}<br><small>Try clicking Refresh or check console logs.</small></div>`;
+  }
 }
 
-async function connect(path, name, serialNum) {
-  const res = await fetch('/api/connect', { 
-    method:'POST', 
-    headers:{'Content-Type':'application/json'}, 
-    body: JSON.stringify({ path }) 
-  });
-  const j = await res.json();
-  if (j.ok) {
-    connectedDevices.set(path, { name, path, serialNum });
-    currentDevice = path;
-    updateFooterSerial(serialNum);
-    log(`✓ Connected to ${name}`, 'out');
-    scanDevices();
-  } else {
-    log(`✗ Connection failed: ${j.error}`, 'err');
+async function connect(path, name, serialNum, retryCount = 0) {
+  try {
+    log(`🔌 Connecting to ${name || path}...`, 'info');
+    const res = await fetch('/api/connect', { 
+      method:'POST', 
+      headers:{'Content-Type':'application/json'}, 
+      body: JSON.stringify({ path }) 
+    });
+    const j = await res.json();
+    if (j.ok) {
+      connectedDevices.set(path, { name, path, serialNum });
+      currentDevice = path;
+      updateFooterSerial(serialNum);
+      log(`✓ Connected to ${name || path}`, 'out');
+      scanDevices();
+    } else {
+      log(`✗ Connection failed: ${j.error || 'Unknown error'}`, 'err');
+      // Only retry once
+      if (retryCount < 1) {
+        setTimeout(() => {
+          log('🔄 Retrying connection (1/1)...', 'info');
+          connect(path, name, serialNum, retryCount + 1);
+        }, 1000);
+      } else {
+        log('✗ Connection failed after retry. Try manual COM port or click Refresh.', 'err');
+      }
+    }
+  } catch (err) {
+    log(`✗ Connection error: ${err.message}`, 'err');
+    console.error('Connect error:', err);
   }
 }
 
 function disconnect(path) {
+  // Send disconnect request to server to release serial port
+  fetch('/api/disconnect', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ path })
+  }).catch(err => console.error('Disconnect error:', err));
+  
   connectedDevices.delete(path);
   if (currentDevice === path) {
     currentDevice = null;
     updateFooterSerial(null);
   }
-  log(`Disconnected from device`, 'info');
+  log(`✓ Disconnected from device - Serial port released for Arduino IDE`, 'info');
   scanDevices();
 }
 
 // ----- Track Names -----
-const defaultTracks = [
-  'Track 1', 'Track 2', 'Track 3', 'Track 4',
-  'Track 5', 'Track 6', 'Track 7', 'Track 8'
-];
+let currentOffset = 0;
+
+function updateOffsetUI() {
+  const start = currentOffset + 1;
+  const end = currentOffset + 8;
+  const offDisplay = $('#offsetDisplay');
+  const offRange = $('#offsetRange');
+  if (offDisplay) offDisplay.textContent = String(currentOffset);
+  if (offRange) offRange.textContent = `${start}-${end}`;
+}
 
 function buildTrackGrid() {
   const host = $('#tracks');
@@ -350,8 +405,9 @@ function buildTrackGrid() {
     const input = document.createElement('input');
     input.className = 'input';
     input.id = 'tname' + i;
-    input.value = defaultTracks[i];
-    input.placeholder = defaultTracks[i];
+    input.name = `track-${i}`;
+    input.value = `Track ${i + 1}`;
+    input.placeholder = `Track ${i + 1}`;
     
     row.appendChild(label);
     row.appendChild(input);
@@ -369,7 +425,10 @@ $('#btnReadTracks').onclick = async () => {
     if (data.ok && data.names) {
       // Populate the UI fields with stored track names
       for (let i = 0; i < 8 && i < data.names.length; i++) {
-        $('#tname' + i).value = data.names[i];
+        const inputElement = document.getElementById('tname' + i);
+        if (inputElement) {
+          inputElement.value = data.names[i] || '';
+        }
       }
       log(`✓ Loaded ${data.names.length} track names from bridge`, 'out');
     } else {
@@ -382,27 +441,93 @@ $('#btnReadTracks').onclick = async () => {
 
 $('#btnResetTracks').onclick = () => {
   for (let i = 0; i < 8; i++) {
-    $('#tname' + i).value = defaultTracks[i];
+    const inputElement = document.getElementById('tname' + i);
+    if (inputElement) {
+      inputElement.value = `Track ${i + 1}`;
+    }
   }
-  log('Reset to default track names', 'info');
+  log('Reset track names to defaults (Track 1-8)', 'info');
+};
+
+// Offset controls
+$('#btnOffsetLeft').onclick = () => {
+  currentOffset = Math.max(0, currentOffset - 8);
+  updateOffsetUI();
+};
+$('#btnOffsetRight').onclick = () => {
+  currentOffset = currentOffset + 8;
+  updateOffsetUI();
+};
+
+// Refresh button - sends OSC to M4L to trigger refresh
+$('#btnRefresh').onclick = async () => {
+  // Check if TDS-8 device is connected
+  if (!currentDevice) {
+    log('✗ Please connect to TDS-8 device first', 'err');
+    log('Click "Connect" button on a device in the TDS-8 Devices section above', 'info');
+    return;
+  }
+  
+  log(`🔄 Requesting track refresh from Ableton...`, 'info');
+  
+  try {
+    // Send OSC message to M4L to trigger refresh
+    const res = await fetch('/api/osc-send', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        address: '/reannounce',
+        args: []
+      })
+    });
+    
+    if (res.ok) {
+      log(`✓ Sent OSC command: /reannounce`, 'out');
+    } else {
+      log(`✗ Failed to send /reannounce`, 'err');
+    }
+  } catch (err) {
+    log(`✗ Error: ${err.message}`, 'err');
+  }
+  // After a short delay, pull stored names from bridge to reflect any M4L updates
+  setTimeout(async () => {
+    await loadStoredTrackNames();
+  }, 400);
 };
 
 $('#btnSendAll').onclick = async () => {
   if (!currentDevice) {
-    log('✗ Please connect a device first', 'err');
+    log('✗ Please connect TDS-8 device first (not Ableton)', 'err');
     return;
   }
-  
   let count = 0;
   for (let i = 0; i < 8; i++) {
-    const name = ($('#tname' + i).value || '').trim();
+    // Get the manual name entered by the user
+    const inputElement = document.getElementById('tname' + i);
+    const name = inputElement ? inputElement.value.trim() : '';
+    
+    // Debug: log the actual value being read
+    console.log(`[DEBUG] Track ${i}:`, {
+      elementId: 'tname' + i,
+      found: !!inputElement,
+      rawValue: inputElement ? inputElement.value : 'N/A',
+      trimmedValue: name,
+      length: name.length
+    });
+    
+    // Calculate actual track number (device adds +1 internally, so send 0-based)
+    const actualTrack = i;
+    
     if (name) {
+      const payload = { index: i, name, actualTrack };
+      console.log(`[DEBUG] Sending to API:`, payload);
       await fetch('/api/trackname', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ index: i, name })
+        body: JSON.stringify(payload)
       });
       count++;
+      await new Promise(r => setTimeout(r, 20));
     }
   }
   log(`✓ Updated ${count} track names`, 'out');
@@ -723,17 +848,66 @@ $('#btnClear').onclick = () => {
     }
     if (msg.type === 'serial-error') log(`✗ Serial error: ${msg.message}`, 'err');
     if (msg.type === 'device-version') log(`Device version: ${msg.version}`, 'info');
+    // OSC messages removed from browser log - check PowerShell console for OSC activity
   };
   ws.onerror = () => log('✗ WebSocket connection error', 'err');
   ws.onclose = () => log('WebSocket disconnected', 'info');
 })();
 
+// Helper function to load stored track names
+async function loadStoredTrackNames() {
+  try {
+    const res = await fetch('/api/tracknames');
+    const j = await res.json();
+    if (j && j.ok && Array.isArray(j.names)) {
+      for (let i = 0; i < 8; i++) {
+        const input = document.getElementById('tname' + i);
+        if (input) input.value = j.names[i] || '';
+      }
+      log('✓ Loaded stored track names', 'info');
+    } else {
+      log(`✗ Failed to load track names: ${j && j.error ? j.error : 'Unknown error'}`, 'err');
+    }
+  } catch (e) {
+    log(`✗ Failed to load track names: ${e.message}`, 'err');
+  }
+}
+
 // ----- Init -----
 loadSavedNetworks();
 buildTrackGrid();
+updateOffsetUI();
+// Don't auto-load on startup - use the default "Track 1" through "Track 8" values
+// User can click "Load Stored Tracks" button if they want to restore from device
+// loadStoredTrackNames();
 scanDevices();
 setInterval(scanDevices, 5000);
 log('TDS-8 Control ready', 'info');
+
+// Refresh Devices button
+const refreshBtn = document.getElementById('btnRefreshDevices');
+if (refreshBtn) {
+  refreshBtn.onclick = async () => {
+    log('🔄 Manually refreshing device list...', 'info');
+    await scanDevices();
+    log('✓ Device list refreshed', 'out');
+  };
+}
+
+// Manual COM connect wiring
+const manualBtn = document.getElementById('btnManualConnect');
+if (manualBtn) {
+  manualBtn.onclick = async () => {
+    const inp = document.getElementById('manualComInput');
+    const path = (inp && inp.value ? inp.value : '').trim();
+    if (!path) { log('✗ Enter a COM port (e.g., COM5)', 'err'); return; }
+    try {
+      await connect(path, path, 'Manual');
+    } catch (e) {
+      log(`✗ Connect failed: ${e.message}`, 'err');
+    }
+  };
+}
 </script>
 </body>
 </html>
