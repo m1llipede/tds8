@@ -375,29 +375,43 @@ app.get('/api/ports', async (_req, res) => {
 // New endpoint to get ALL serial ports (unfiltered) for alternate connection dropdown
 app.get('/api/ports/all', async (_req, res) => {
   const ports = await listPorts();
+  const psPortInfo = new Map(); // Store PowerShell data by DeviceID
   
-  // On Windows, also try PowerShell discovery
+  // On Windows, get detailed port info from PowerShell
   if (process.platform === 'win32') {
     try {
       await new Promise((resolve) => {
         const cmd = 'powershell -NoProfile -Command "try { Get-CimInstance Win32_SerialPort | Select-Object DeviceID, Name, Description | ConvertTo-Json } catch { try { Get-WmiObject Win32_SerialPort | Select-Object DeviceID, Name, Description | ConvertTo-Json } catch {} }"';
         exec(cmd, { windowsHide: true }, (err, stdout) => {
           if (!err && stdout) {
+            console.log('PowerShell COM port raw output:', stdout);
             try {
               const psData = JSON.parse(stdout);
               const psArray = Array.isArray(psData) ? psData : [psData];
+              console.log('Parsed PowerShell data:', psArray);
               psArray.forEach(item => {
-                if (item.DeviceID && !ports.some(p => p.path === item.DeviceID)) {
-                  ports.push({
-                    path: item.DeviceID,
-                    manufacturer: item.Name || item.Description || '',
-                    pnpId: item.Description || ''
+                if (item.DeviceID) {
+                  console.log(`Mapping ${item.DeviceID} -> ${item.Name}`);
+                  psPortInfo.set(item.DeviceID, {
+                    name: item.Name || '',
+                    description: item.Description || ''
                   });
+                  // Add to ports list if not already there
+                  if (!ports.some(p => p.path === item.DeviceID)) {
+                    ports.push({
+                      path: item.DeviceID,
+                      manufacturer: item.Name || item.Description || '',
+                      pnpId: item.Description || ''
+                    });
+                  }
                 }
               });
             } catch (e) {
               console.log('PowerShell JSON parse error:', e.message);
+              console.log('Raw stdout was:', stdout);
             }
+          } else {
+            console.log('PowerShell command failed or returned no output');
           }
           resolve();
         });
@@ -407,17 +421,30 @@ app.get('/api/ports/all', async (_req, res) => {
     }
   }
   
-  const decorated = ports.map(p => ({
-    path: p.path,
-    label: [p.manufacturer, p.path].filter(Boolean).join(' - ') || p.path,
-    vendorId: p.vendorId || '',
-    productId: p.productId || '',
-    serialNumber: p.serialNumber || '',
-    manufacturer: p.manufacturer || '',
-    pnpId: p.pnpId || ''
-  }));
+  const decorated = ports.map(p => {
+    let displayLabel = p.path;
+    
+    // Prefer PowerShell Name over manufacturer
+    const psInfo = psPortInfo.get(p.path);
+    if (psInfo && psInfo.name) {
+      displayLabel = psInfo.name;
+    } else if (p.manufacturer && p.manufacturer !== 'Microsoft') {
+      displayLabel = `${p.manufacturer} - ${p.path}`;
+    }
+    
+    return {
+      path: p.path,
+      label: displayLabel,
+      vendorId: p.vendorId || '',
+      productId: p.productId || '',
+      serialNumber: p.serialNumber || '',
+      manufacturer: p.manufacturer || '',
+      pnpId: p.pnpId || ''
+    };
+  });
   
   console.log(`📋 All COM ports (unfiltered): ${decorated.length} found`);
+  console.log('Port labels:', decorated.map(p => `${p.path}: ${p.label}`));
   res.json(decorated);
 });
 
@@ -495,40 +522,50 @@ app.get('/api/wifi-scan', (_req, res) => {
     return res.status(500).json({ error: 'WiFi scan not supported on this platform' });
   }
   
-  const cmd = isMac 
+  const scanCmd = isMac 
     ? 'networksetup -listpreferredwirelessnetworks en0 2>/dev/null'
     : 'netsh wlan show networks mode=Bssid';
   
-  exec(cmd, { windowsHide: true }, (err, stdout) => {
+  exec(scanCmd, { windowsHide: true, timeout: 10000 }, (err, stdout) => {
     if (err) { 
+      console.error('WiFi scan error:', err);
       res.status(500).json({ error: err.message }); 
-      return; 
+      return;
     }
     
-    const ssids = [];
-    
-    if (isMac) {
-      // Parse Mac networksetup output: "Preferred networks on en0:\n\t\tSSID1\n\t\tSSID2"
-      stdout.split(/\r?\n/).forEach(line => {
-        const trimmed = line.trim();
-        if (trimmed && !trimmed.startsWith('Preferred') && !trimmed.includes(':')) {
-          if (!ssids.includes(trimmed)) ssids.push(trimmed);
-        }
-      });
-    } else {
-      // Parse Windows netsh output
-      stdout.split(/\r?\n/).forEach(line => {
-        const m = line.match(/^\s*SSID\s+\d+\s*:\s*(.+)$/i);
-        if (m) { 
-          const name = m[1].trim(); 
-          if (name && !ssids.includes(name)) ssids.push(name); 
-        }
-      });
-    }
-    
-    res.json({ ok: true, ssids });
+    parseWiFiOutput(stdout, isMac, res);
   });
 });
+
+function parseWiFiOutput(stdout, isMac, res) {
+  console.log('WiFi scan raw output:', stdout);
+  const ssids = [];
+  
+  if (isMac) {
+    // Parse Mac networksetup output: "Preferred networks on en0:\n\t\tSSID1\n\t\tSSID2"
+    stdout.split(/\r?\n/).forEach(line => {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith('Preferred') && !trimmed.includes(':')) {
+        if (!ssids.includes(trimmed)) ssids.push(trimmed);
+      }
+    });
+  } else {
+    // Parse Windows netsh output
+    stdout.split(/\r?\n/).forEach(line => {
+      const m = line.match(/^\s*SSID\s+\d+\s*:\s*(.+)$/i);
+      if (m) { 
+        const name = m[1].trim(); 
+        if (name && !ssids.includes(name)) {
+          console.log(`Found SSID: "${name}"`);
+          ssids.push(name); 
+        }
+      }
+    });
+  }
+  
+  console.log(`📡 WiFi scan complete: ${ssids.length} networks found:`, ssids);
+  res.json({ ok: true, ssids });
+}
 
 // GET /tracks - Return current track names for Ableton M4L
 // Persist names to disk so they survive server restarts

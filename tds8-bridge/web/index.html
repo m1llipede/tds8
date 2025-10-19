@@ -786,29 +786,65 @@ function displayNetworkList() {
 }
 
 async function connectToNetwork(ssid, password) {
-  const r = await fetch('/api/wifi-join', {
+  // Step 1: Send WiFi credentials
+  log(`📡 Step 1/3: Saving WiFi credentials for "${ssid}"...`, 'info');
+  const r1 = await fetch('/api/wifi-join', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({ ssid, password })
   });
   
-  const j = await r.json();
-  if (j.ok) {
-    log(`✓ Connecting to "${ssid}"... (wired mode disabled)`, 'out');
-    $('#modalWifi').style.display = 'none';
-    // Update WiFi status badge
-    const wifiStatus = $('#wifiStatus');
-    const wifiSelect = $('#wifiNetworkSelect');
-    if (wifiStatus) {
-      wifiStatus.textContent = 'Connected';
-      wifiStatus.style.background = '#10b981';
-      wifiStatus.style.color = '#fff';
-    }
-    if (wifiSelect) {
-      wifiSelect.style.backgroundColor = '#d1fae5';
-    }
-  } else {
-    log(`✗ Failed to join network: ${j.error}`, 'err');
+  const j1 = await r1.json();
+  if (!j1.ok) {
+    log(`✗ Failed to save WiFi credentials: ${j1.error}`, 'err');
+    return;
+  }
+  
+  log(`✓ WiFi credentials saved`, 'out');
+  
+  // Step 2: Disable wired-only mode
+  log(`📡 Step 2/3: Enabling WiFi mode...`, 'info');
+  await new Promise(r => setTimeout(r, 500)); // Small delay
+  
+  const r2 = await fetch('/api/comm-mode', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ mode: 'wifi' })
+  });
+  
+  const j2 = await r2.json();
+  if (!j2.ok) {
+    log(`✗ Failed to enable WiFi mode: ${j2.error}`, 'err');
+    return;
+  }
+  
+  log(`✓ WiFi mode enabled`, 'out');
+  
+  // Step 3: Reboot device
+  log(`📡 Step 3/3: Rebooting device to connect to WiFi...`, 'info');
+  await new Promise(r => setTimeout(r, 500)); // Small delay
+  
+  await fetch('/api/send', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ cmd: 'REBOOT' })
+  });
+  
+  log(`✓ Device rebooting... It will connect to "${ssid}" and disconnect from USB`, 'out');
+  log(`⚠️ You will lose USB connection. Device will be available via WiFi.`, 'info');
+  
+  $('#modalWifi').style.display = 'none';
+  
+  // Update WiFi status badge
+  const wifiStatus = $('#wifiStatus');
+  const wifiSelect = $('#wifiNetworkSelect');
+  if (wifiStatus) {
+    wifiStatus.textContent = 'Connecting...';
+    wifiStatus.style.background = '#f59e0b';
+    wifiStatus.style.color = '#fff';
+  }
+  if (wifiSelect) {
+    wifiSelect.style.backgroundColor = '#fef3c7';
   }
 }
 
@@ -1108,15 +1144,26 @@ if (wiredConnectBtn) {
 const wifiConnectBtn = document.getElementById('btnWifiConnect');
 if (wifiConnectBtn) {
   wifiConnectBtn.onclick = async () => {
+    if (!currentDevice) {
+      log('✗ Please connect to TDS-8 device first (wired connection required to configure WiFi)', 'err');
+      return;
+    }
+    
     const wifiSelect = document.getElementById('wifiNetworkSelect');
     const ssid = wifiSelect ? wifiSelect.value : '';
     if (!ssid) {
       log('✗ Select a WiFi network from the dropdown', 'err');
       return;
     }
-    // Open WiFi modal to enter password
-    $('#modalWifi').style.display = 'block';
-    $('#ssidInput').value = ssid;
+    
+    // Prompt for password
+    const password = prompt(`Enter password for WiFi network "${ssid}":\n\n(Leave blank if no password)`);
+    if (password === null) return; // User cancelled
+    
+    log(`📡 Configuring TDS-8 to connect to "${ssid}"...`, 'info');
+    log('⚠️ Device will disconnect from USB and switch to WiFi mode', 'info');
+    
+    await connectToNetwork(ssid, password);
   };
 }
 </script>
