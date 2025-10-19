@@ -150,14 +150,26 @@ function initOSCListener() {
                 wsBroadcast({ type: 'osc-received', from: `${fromIP}:${fromPort}`, address: oscMsg.address, args: oscMsg.args });
                 
                 // Handle /ipupdate from device (when it connects to WiFi)
-                if (oscMsg.address === "/ipupdate" && oscMsg.args.length > 0) {
-                    const newIP = oscMsg.args[0].value;
-                    if (newIP && newIP !== deviceIP) {
-                        deviceIP = newIP;
-                        console.log(`📡 Device IP updated: ${deviceIP}`);
-                        wsBroadcast({ type: 'device-ip', ip: deviceIP });
-                        // Forward to M4L so it knows device IP
-                        broadcastIPUpdate();
+                if (oscMsg.address === "/ipupdate") {
+                    if (oscMsg.args.length > 0) {
+                        const newIP = oscMsg.args[0].value;
+                        const ssid = oscMsg.args.length > 1 ? oscMsg.args[1].value : null;
+                        
+                        console.log(`RECV: /ipupdate ${newIP}`);
+                        
+                        if (newIP && newIP !== deviceIP) {
+                            deviceIP = newIP;
+                            
+                            wsBroadcast({ 
+                                type: 'device-ip', 
+                                ip: deviceIP,
+                                ssid: ssid,
+                                connectionType: newIP === '127.0.0.1' ? 'wired' : 'wifi'
+                            });
+                            
+                            // Forward to M4L
+                            broadcastIPUpdate();
+                        }
                     }
                     return;
                 }
@@ -219,10 +231,63 @@ function initOSCListener() {
     return oscListener;
 }
 
+// OSC Listener on port 9000 for receiving /ipupdate from TDS-8 device
+let deviceListener = null;
+
+function initDeviceListener() {
+    if (!deviceListener) {
+        try {
+            deviceListener = new osc.UDPPort({
+                localAddress: "0.0.0.0",
+                localPort: 9000,
+                metadata: true
+            });
+            
+            deviceListener.on("message", (oscMsg) => {
+                // Only handle /ipupdate from device
+                if (oscMsg.address === "/ipupdate" && oscMsg.args.length > 0) {
+                    const newIP = oscMsg.args[0].value;
+                    const ssid = oscMsg.args.length > 1 ? oscMsg.args[1].value : null;
+                    
+                    console.log(`RECV: /ipupdate ${newIP} (from device)`);
+                    
+                    if (newIP && newIP !== deviceIP) {
+                        deviceIP = newIP;
+                        
+                        wsBroadcast({ 
+                            type: 'device-ip', 
+                            ip: deviceIP,
+                            ssid: ssid,
+                            connectionType: newIP === '127.0.0.1' ? 'wired' : 'wifi'
+                        });
+                        
+                        // Forward to M4L
+                        broadcastIPUpdate();
+                    }
+                }
+            });
+            
+            deviceListener.on("ready", () => {
+                console.log(`📡 Device Listener: Ready on port 9000 (receives /ipupdate from TDS-8)`);
+            });
+            
+            deviceListener.on("error", (err) => {
+                console.error("Device listener error:", err.message);
+            });
+            
+            deviceListener.open();
+        } catch (err) {
+            console.error("Device listener init error:", err.message);
+        }
+    }
+    return deviceListener;
+}
+
 // Start OSC sender and listener immediately
 console.log('\n========== OSC INITIALIZATION ==========');
 initOSC();        // Initialize OSC sender
-initOSCListener(); // Initialize OSC listener
+initOSCListener(); // Initialize OSC listener (port 8000 - from M4L)
+initDeviceListener(); // Initialize device listener (port 9000 - from TDS-8)
 console.log('========================================\n');
 // Function to broadcast IP update to M4L (port 9000)
 function broadcastIPUpdate() {
@@ -232,12 +297,12 @@ function broadcastIPUpdate() {
         
         const message = {
             address: "/ipupdate",
-            args: [{ type: "s", value: deviceIP }] // Send actual device IP (not hardcoded localhost)
+            args: [{ type: "s", value: deviceIP }]
         };
+        console.log(`SENT: /ipupdate ${deviceIP} (to M4L)`);
         port.send(message, "127.0.0.1", 9000);
-        console.log(`📡 Sent to M4L: /ipupdate ${deviceIP}`);
     } catch (err) {
-        console.error("Broadcast error:", err.message);
+        console.error("Error:", err.message);
     }
 }
 
@@ -285,15 +350,19 @@ async function openSerial(desiredPath) {
   serial.on('close', () => wsBroadcast({ type: 'serial-close', path: serialPath }));
 
   wsBroadcast({ type: 'serial-open', path: serialPath, baud: BAUD });
-  console.log(`🔌 Serial Port: ${serialPath} @ ${BAUD} baud`);
-  send('/reannounce\n'); send('VERSION\n');
+  console.log(`Serial Port: ${serialPath} @ ${BAUD} baud`);
+  send('/reannounce\n'); 
+  send('VERSION\n');
   return serialPath;
 }
 
 function send(s) {
-  if (!serial || !serial.isOpen) throw new Error('Serial not open');
+  if (!serial || !serial.isOpen) {
+    console.error('❌ Cannot send - Serial not open');
+    throw new Error('Serial not open');
+  }
   serial.write(s);
-  console.log(`Sent: ${s.trim()}`);
+  console.log(`SENT: ${s.trim()}`);
 }
 
 function onSerialData(chunk) {
@@ -304,7 +373,9 @@ function onSerialData(chunk) {
   while ((idx = serialBuf.indexOf('\n')) >= 0) {
     const line = serialBuf.slice(0, idx).trim();
     serialBuf = serialBuf.slice(idx + 1);
-    if (line) console.log(`📥 Serial RX: ${line}`);
+    if (line) {
+      console.log(`RECV: ${line}`);
+    }
     const m = /^VERSION\s*[:=]\s*([\w.\-]+)/i.exec(line);
     if (m) { deviceVersion = m[1]; wsBroadcast({ type: 'device-version', version: deviceVersion }); }
   }
@@ -428,8 +499,12 @@ app.get('/api/ports/all', async (_req, res) => {
     const psInfo = psPortInfo.get(p.path);
     if (psInfo && psInfo.name) {
       displayLabel = psInfo.name;
+      console.log(`✓ Using PowerShell name for ${p.path}: ${displayLabel}`);
     } else if (p.manufacturer && p.manufacturer !== 'Microsoft') {
       displayLabel = `${p.manufacturer} - ${p.path}`;
+      console.log(`Using manufacturer for ${p.path}: ${displayLabel}`);
+    } else {
+      console.log(`⚠️ No good label for ${p.path}, using path only. Manufacturer: ${p.manufacturer}`);
     }
     
     return {
@@ -444,7 +519,7 @@ app.get('/api/ports/all', async (_req, res) => {
   });
   
   console.log(`📋 All COM ports (unfiltered): ${decorated.length} found`);
-  console.log('Port labels:', decorated.map(p => `${p.path}: ${p.label}`));
+  console.log('Final port labels:', decorated.map(p => `${p.path} = "${p.label}"`).join(', '));
   res.json(decorated);
 });
 
@@ -489,7 +564,10 @@ app.post('/api/send', (req, res) => {
     if (!cmd) throw new Error('Missing cmd');
     send(cmd.endsWith('\n') ? cmd : cmd + '\n');
     res.json({ ok: true });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { 
+    console.error(`Error:`, e.message);
+    res.status(400).json({ error: e.message }); 
+  }
 });
 
 // Communication toggle
@@ -497,10 +575,17 @@ app.post('/api/comm-mode', (req, res) => {
   try {
     const mode = String((req.body && req.body.mode) || '').toLowerCase();
     if (!['wired','wifi'].includes(mode)) throw new Error('mode must be wired or wifi');
-    if (mode === 'wired') send('WIRED_ONLY true\n');
-    else { send('WIRED_ONLY false\n'); send('WIFI_ON\n'); }
+    if (mode === 'wired') {
+      send('WIRED_ONLY true\n');
+    } else { 
+      send('WIRED_ONLY false\n'); 
+      send('WIFI_ON\n'); 
+    }
     res.json({ ok: true, mode });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { 
+    console.error(`Error:`, e.message);
+    res.status(400).json({ error: e.message }); 
+  }
 });
 
 // Wi-Fi join + Windows scan
@@ -509,9 +594,13 @@ app.post('/api/wifi-join', (req, res) => {
     const { ssid, password } = req.body || {};
     if (!ssid) throw new Error('Missing ssid');
     const esc = s => '"' + String(s).replace(/"/g, '\\"') + '"';
-    send(`WIFI_JOIN ${esc(ssid)} ${esc(password || '')}\n`);
+    const cmd = `WIFI_JOIN ${esc(ssid)} ${esc(password || '')}`;
+    send(cmd + '\n');
     res.json({ ok: true });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { 
+    console.error(`Error:`, e.message);
+    res.status(400).json({ error: e.message }); 
+  }
 });
 
 app.get('/api/wifi-scan', (_req, res) => {
@@ -686,6 +775,16 @@ app.post('/api/broadcast-ip', (req, res) => {
     broadcastIPUpdate();
     res.json({ ok: true, message: 'Broadcast sent to port 9000' });
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Get current device status
+app.get('/api/device-status', (req, res) => {
+  const connectionType = deviceIP === '127.0.0.1' ? 'wired' : (deviceIP ? 'wifi' : 'none');
+  res.json({ 
+    ok: true, 
+    ip: deviceIP || '—',
+    connectionType: connectionType
+  });
 });
 
 // Firmware — check single manifest

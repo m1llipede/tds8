@@ -72,6 +72,18 @@ select.input{cursor:pointer}
 </head>
 <body>
   <div class="wrap">
+    <!-- Connection Status Banner -->
+    <div id="connectionBanner" style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:12px 20px;margin-bottom:16px;border-radius:8px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,0.1)">
+      <div style="display:flex;align-items:center;gap:16px">
+        <div style="font-size:13px;font-weight:600;opacity:0.9">TDS-8 Connection:</div>
+        <div id="connectionType" style="font-size:14px;font-weight:700;padding:4px 12px;background:rgba(255,255,255,0.2);border-radius:4px;border:1px solid rgba(255,255,255,0.3)">Not Connected</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="font-size:11px;opacity:0.8">IP Address:</div>
+        <div id="connectionIP" style="font-family:ui-monospace,monospace;font-size:13px;font-weight:600;padding:4px 10px;background:rgba(0,0,0,0.2);border-radius:4px">—</div>
+      </div>
+    </div>
+    
     <div class="main-grid">
       <!-- Left Column -->
       <div class="left-col">
@@ -112,10 +124,10 @@ select.input{cursor:pointer}
                   <span id="wifiStatus" style="font-size:10px;padding:2px 8px;border-radius:4px;background:#e5e7eb;color:#6b7280">Disconnected</span>
                 </div>
                 <div style="display:flex;gap:8px;align-items:center">
-                  <select id="wifiNetworkSelect" class="input" style="flex:1;font-size:12px;padding:6px 8px">
+                  <select id="wifiNetworkSelect" class="input" style="flex:1;font-size:12px;padding:6px 8px" title="Windows may only show currently connected network. Disconnect WiFi to see all networks.">
                     <option value="">Select WiFi network...</option>
                   </select>
-                  <button id="btnWifiScanQuick" class="btn ghost sm" title="Scan for networks">🔄</button>
+                  <button id="btnWifiScanQuick" class="btn ghost sm" title="Scan for networks (may only show connected network on Windows)">🔄</button>
                   <button id="btnWifiConnect" class="btn primary sm">Connect</button>
                 </div>
               </div>
@@ -144,8 +156,7 @@ select.input{cursor:pointer}
               <button id="btnRefresh" class="btn primary">🔄 Refresh from Ableton</button>
               <button id="btnReadTracks" class="btn secondary sm">Load Stored Tracks</button>
               <button id="btnSendAll" class="btn ghost sm">Update All Tracks</button>
-                            <button id="btnResetTracks" class="btn ghost sm">Reset to Defaults</button>
-              <button id="btnClearTracks" class="btn ghost sm">Clear</button>
+              <button id="btnResetTracks" class="btn ghost sm">Reset to Defaults</button>
             </div>
           </div>
         </div>
@@ -161,7 +172,6 @@ select.input{cursor:pointer}
             <div style="margin-top:10px;display:flex;gap:8px">
               <input id="cmd" class="input" placeholder="Send command..." style="flex:1;font-size:12px;padding:6px 8px"/>
               <button id="btnSend" class="btn ghost sm">Send</button>
-              <button id="btnClear" class="btn ghost sm">Clear</button>
             </div>
           </div>
         </div>
@@ -255,6 +265,37 @@ let currentDevice = null;
 let deviceCounter = 0;
 let savedWifiNetworks = [];
 let deviceSerialNumber = 'Unknown';
+let currentConnectionType = 'none'; // 'none', 'wired', 'wifi'
+let currentConnectionIP = '—';
+
+// Update connection status banner
+function updateConnectionBanner(type, ip) {
+  currentConnectionType = type;
+  currentConnectionIP = ip || '—';
+  
+  const typeEl = $('#connectionType');
+  const ipEl = $('#connectionIP');
+  const banner = $('#connectionBanner');
+  
+  if (type === 'wired') {
+    typeEl.textContent = '🔌 Wired (USB)';
+    typeEl.style.background = 'rgba(16,185,129,0.3)';
+    typeEl.style.border = '1px solid rgba(16,185,129,0.5)';
+    banner.style.background = 'linear-gradient(135deg,#10b981 0%,#059669 100%)';
+  } else if (type === 'wifi') {
+    typeEl.textContent = '📡 WiFi';
+    typeEl.style.background = 'rgba(59,130,246,0.3)';
+    typeEl.style.border = '1px solid rgba(59,130,246,0.5)';
+    banner.style.background = 'linear-gradient(135deg,#3b82f6 0%,#2563eb 100%)';
+  } else {
+    typeEl.textContent = '❌ Not Connected';
+    typeEl.style.background = 'rgba(239,68,68,0.3)';
+    typeEl.style.border = '1px solid rgba(239,68,68,0.5)';
+    banner.style.background = 'linear-gradient(135deg,#6b7280 0%,#4b5563 100%)';
+  }
+  
+  ipEl.textContent = currentConnectionIP;
+}
 
 // Load saved networks from localStorage
 function loadSavedNetworks() {
@@ -406,6 +447,7 @@ async function connect(path, name, serialNum, retryCount = 0) {
       currentDevice = path;
       updateFooterSerial(serialNum);
       updateConnectionStatus(true);
+      updateConnectionBanner('wired', '127.0.0.1');
       log(`✓ Connected to ${name || path}`, 'out');
       scanDevices();
     } else {
@@ -439,6 +481,7 @@ function disconnect(path) {
     currentDevice = null;
     updateFooterSerial(null);
     updateConnectionStatus(false);
+    updateConnectionBanner('none', '—');
     // Reset wired connection UI
     const wiredBtn = $('#btnWiredConnect');
     const comSelect = $('#comPortSelect');
@@ -545,16 +588,6 @@ $('#btnReadTracks').onclick = async () => {
   }
 };
 
-$('#btnClearTracks').onclick = () => {
-  for (let i = 0; i < 8; i++) {
-    const inputElement = document.getElementById('tname' + i);
-    if (inputElement) {
-      inputElement.value = '';
-    }
-  }
-  log('Cleared track names for manual entry', 'info');
-  saveLocalTrackNames(); // Also save the cleared state
-};
 
 $('#btnResetTracks').onclick = () => {
   for (let i = 0; i < 8; i++) {
@@ -822,30 +855,24 @@ async function connectToNetwork(ssid, password) {
   
   // Step 3: Reboot device
   log(`📡 Step 3/3: Rebooting device to connect to WiFi...`, 'info');
-  await new Promise(r => setTimeout(r, 500)); // Small delay
+  await new Promise(r => setTimeout(r, 1000)); // Wait for settings to save
   
-  await fetch('/api/send', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ cmd: 'REBOOT' })
-  });
+  try {
+    await fetch('/api/send', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ cmd: 'REBOOT' })
+    });
+  } catch (e) {
+    // Device may disconnect before responding, that's OK
+  }
   
-  log(`✓ Device rebooting... It will connect to "${ssid}" and disconnect from USB`, 'out');
-  log(`⚠️ You will lose USB connection. Device will be available via WiFi.`, 'info');
+  log(`✓ Device rebooting...`, 'out');
+  log(`⚠️ Device will disconnect from USB and connect to "${ssid}"`, 'info');
+  log(`⏳ Wait 10-15 seconds for device to connect to WiFi`, 'info');
+  log(`💡 Check your router to find the device's IP address`, 'info');
   
   $('#modalWifi').style.display = 'none';
-  
-  // Update WiFi status badge
-  const wifiStatus = $('#wifiStatus');
-  const wifiSelect = $('#wifiNetworkSelect');
-  if (wifiStatus) {
-    wifiStatus.textContent = 'Connecting...';
-    wifiStatus.style.background = '#f59e0b';
-    wifiStatus.style.color = '#fff';
-  }
-  if (wifiSelect) {
-    wifiSelect.style.backgroundColor = '#fef3c7';
-  }
 }
 
 $('#btnSaveNetwork').onclick = async () => {
@@ -1000,10 +1027,6 @@ $('#cmd').onkeypress = (e) => {
   }
 };
 
-$('#btnClear').onclick = () => {
-  logEl.innerHTML = '';
-  log('Serial monitor cleared', 'info');
-};
 
 // ----- WebSocket -----
 (() => {
@@ -1033,6 +1056,52 @@ $('#btnClear').onclick = () => {
         : '';
       log(`Received: ${msg.address}${argsStr}`, 'info');
     }
+    
+    // Handle device IP update (WiFi connection)
+    if (msg.type === 'device-ip') {
+      const wifiStatus = $('#wifiStatus');
+      const wifiSelect = $('#wifiNetworkSelect');
+      const wiredStatus = $('#wiredStatus');
+      const wiredBtn = $('#btnWiredConnect');
+      const comSelect = $('#comPortSelect');
+      
+      if (msg.connectionType === 'wifi') {
+        // Device connected to WiFi
+        log(`✅ Device connected to WiFi: ${msg.ip}${msg.ssid ? ' (' + msg.ssid + ')' : ''}`, 'out');
+        
+        // Update connection banner
+        updateConnectionBanner('wifi', msg.ip);
+        
+        if (wifiStatus) {
+          wifiStatus.textContent = 'Connected';
+          wifiStatus.style.background = '#10b981';
+          wifiStatus.style.color = '#fff';
+        }
+        if (wifiSelect) {
+          wifiSelect.style.backgroundColor = '#d1fae5';
+        }
+        
+        // Clear wired connection UI (USB disconnects when WiFi connects)
+        if (wiredStatus) {
+          wiredStatus.textContent = 'Disconnected';
+          wiredStatus.style.background = '#e5e7eb';
+          wiredStatus.style.color = '#6b7280';
+        }
+        if (wiredBtn) {
+          wiredBtn.textContent = 'Connect';
+          wiredBtn.className = 'btn primary sm';
+        }
+        if (comSelect) {
+          comSelect.style.backgroundColor = '';
+        }
+        
+        // Update connection status
+        updateConnectionStatus(false);
+      } else if (msg.connectionType === 'wired') {
+        // Device connected via USB
+        updateConnectionBanner('wired', msg.ip);
+      }
+    }
   };
   ws.onerror = () => log('✗ WebSocket connection error', 'err');
   ws.onclose = () => log('WebSocket disconnected', 'info');
@@ -1057,12 +1126,27 @@ async function loadStoredTrackNames() {
   }
 }
 
+// Check device status on load
+async function checkDeviceStatus() {
+  try {
+    const res = await fetch('/api/device-status');
+    const data = await res.json();
+    if (data.ok && data.connectionType !== 'none') {
+      updateConnectionBanner(data.connectionType, data.ip);
+      log(`Device already connected: ${data.connectionType} (${data.ip})`, 'info');
+    }
+  } catch (e) {
+    console.error('Failed to check device status:', e);
+  }
+}
+
 // ----- Init -----
 loadSavedNetworks();
 buildTrackGrid();
 updateOffsetUI();
 // Load track names from localStorage (instant restore of manual entries)
 loadLocalTrackNames();
+checkDeviceStatus(); // Check if device is already connected
 scanDevices();
 setInterval(scanDevices, 5000);
 // Auto-scan WiFi networks on startup

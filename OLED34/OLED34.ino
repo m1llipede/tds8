@@ -215,6 +215,8 @@ void showQuickStartInstructions();
 void handleTrackName(OSCMessage &msg);
 void handleActiveTrack(OSCMessage &msg);
 void handleReannounceOSC(OSCMessage &msg);
+void handleHi(OSCMessage &msg);
+void sendHelloToM4L();
 void handleTracksReset();
 
 void handleRoot();
@@ -301,10 +303,9 @@ void setup() {
   loadConfig();
   loadWifiCreds();
   loadTrackNames();
-  // Force wired mode on boot - override any saved preference
-  wiredOnly = true;
-  saveWiredMode();  // Save the default
-  Serial.println("🔒 Forced WIRED MODE on boot (use WIFI_ON to enable WiFi)");
+  // Load saved wired mode preference (defaults to true if never set)
+  loadWiredMode();
+  Serial.printf("🔧 Mode on boot: %s (saved preference)\n", wiredOnly ? "WIRED" : "WiFi");
 
   Serial.printf("VERSION: %s\n", FW_VERSION);
   Serial.printf("BUILD: %s\n", FW_BUILD);
@@ -507,6 +508,7 @@ void loop() {
     while ((size = Udp.parsePacket()) > 0) {
       while (size--) msg.fill(Udp.read());
       if (!msg.hasError()) {
+        msg.dispatch("/hi",          handleHi);
         msg.dispatch("/trackname",   handleTrackName);
         msg.dispatch("/activetrack", handleActiveTrack);
         msg.dispatch("/reannounce",  handleReannounceOSC);
@@ -516,14 +518,21 @@ void loop() {
       yield();
     }
 
-    // Discovery beacons
+    // Discovery beacons and M4L heartbeat
     unsigned long now = millis();
     if (discoveryActive) {
       if (now >= discoveryUntil) {
         discoveryActive = false;
       } else if (now >= nextBeaconAt) {
         broadcastIP();
+        sendHelloToM4L(); // Send /hello to M4L for heartbeat
         nextBeaconAt += beaconPeriodMs;
+      }
+    } else {
+      // Keep sending /hello even after discovery period ends
+      if (now >= nextBeaconAt) {
+        sendHelloToM4L();
+        nextBeaconAt = now + beaconPeriodMs;
       }
     }
 
@@ -828,6 +837,30 @@ void handleActiveTrack(OSCMessage &msg) {
 }
 
 void handleReannounceOSC(OSCMessage &msg) { broadcastIP(); }
+
+void handleHi(OSCMessage &msg) {
+  // Received /hi from M4L - Ableton is connected
+  Serial.println("📡 Received /hi from M4L - Ableton connected");
+  if (!abletonBannerShown) {
+    showAbletonConnectedAll();
+    abletonBannerShown = true;
+  }
+}
+
+void sendHelloToM4L() {
+  // Send /hello to M4L on port 9000 (broadcast)
+  if (WiFi.status() != WL_CONNECTED) return;
+  
+  IPAddress gw = WiFi.gatewayIP();
+  IPAddress bcast(gw[0], gw[1], gw[2], 255);
+  
+  OSCMessage msg("/hello");
+  Udp.beginPacket(bcast, 9000);
+  msg.send(Udp);
+  Udp.endPacket();
+  
+  Serial.printf("📡 Sent /hello to %s:9000\n", bcast.toString().c_str());
+}
 
 // =====================  HTTP endpoints  ===================
 void handleRoot() {
@@ -1502,6 +1535,18 @@ void showQuickStartInstructions() {
   display.getTextBounds("Dashboard", 0, 0, &x1, &y1, &w, &h);
   display.setCursor((SCREEN_WIDTH - w) / 2, 45);
   display.println("Dashboard");
+  display.display();
+
+  // Display 6 - blank
+  tcaSelect(6);
+  display.clearDisplay();
+  display.display();
+
+  // Display 7 (OLED 8) - Show PlayOptix logo
+  tcaSelect(7);
+  display.clearDisplay();
+  display.drawBitmap(0, 0, playoptix_logo, LOGO_WIDTH, LOGO_HEIGHT, SSD1306_WHITE);
+  display.fillRect(0, 56, 128, 8, SSD1306_BLACK); // Cover artifacts at bottom
   display.display();
 }
 
