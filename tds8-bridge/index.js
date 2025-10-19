@@ -366,8 +366,58 @@ app.get('/api/ports', async (_req, res) => {
     productId: p.productId || '',
     serialNumber: p.serialNumber || '',
     manufacturer: p.manufacturer || '',
+    pnpId: p.pnpId || '',
+    isTDS8: tds8Devices.some(t => t.path === p.path)
+  }));
+  res.json(decorated);
+});
+
+// New endpoint to get ALL serial ports (unfiltered) for alternate connection dropdown
+app.get('/api/ports/all', async (_req, res) => {
+  const ports = await listPorts();
+  
+  // On Windows, also try PowerShell discovery
+  if (process.platform === 'win32') {
+    try {
+      await new Promise((resolve) => {
+        const cmd = 'powershell -NoProfile -Command "try { Get-CimInstance Win32_SerialPort | Select-Object DeviceID, Name, Description | ConvertTo-Json } catch { try { Get-WmiObject Win32_SerialPort | Select-Object DeviceID, Name, Description | ConvertTo-Json } catch {} }"';
+        exec(cmd, { windowsHide: true }, (err, stdout) => {
+          if (!err && stdout) {
+            try {
+              const psData = JSON.parse(stdout);
+              const psArray = Array.isArray(psData) ? psData : [psData];
+              psArray.forEach(item => {
+                if (item.DeviceID && !ports.some(p => p.path === item.DeviceID)) {
+                  ports.push({
+                    path: item.DeviceID,
+                    manufacturer: item.Name || item.Description || '',
+                    pnpId: item.Description || ''
+                  });
+                }
+              });
+            } catch (e) {
+              console.log('PowerShell JSON parse error:', e.message);
+            }
+          }
+          resolve();
+        });
+      });
+    } catch (e) {
+      console.log('PowerShell COM discovery skipped:', e.message);
+    }
+  }
+  
+  const decorated = ports.map(p => ({
+    path: p.path,
+    label: [p.manufacturer, p.path].filter(Boolean).join(' - ') || p.path,
+    vendorId: p.vendorId || '',
+    productId: p.productId || '',
+    serialNumber: p.serialNumber || '',
+    manufacturer: p.manufacturer || '',
     pnpId: p.pnpId || ''
   }));
+  
+  console.log(`📋 All COM ports (unfiltered): ${decorated.length} found`);
   res.json(decorated);
 });
 

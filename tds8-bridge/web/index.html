@@ -80,13 +80,23 @@ select.input{cursor:pointer}
         <div class="card">
           <div class="hdr" style="display:flex;justify-content:space-between;align-items:center">
             <h1>🎛️ TDS-8 Devices</h1>
-            <button id="btnRefreshDevices" class="btn ghost sm" style="background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3);padding:4px 10px;font-size:11px">🔄 Refresh</button>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button id="btnFirmwareTop" class="btn secondary sm" title="Check for Firmware Updates" style="background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3);padding:4px 10px;font-size:11px">⬇️ Firmware</button>
+              <button id="btnRefreshDevices" class="btn ghost sm" style="background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3);padding:4px 10px;font-size:11px">🔄 Refresh</button>
+            </div>
           </div>
           <div class="body">
-            <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:16px;padding:12px;background:#fafbff;border:2px solid #e3e6ef;border-radius:8px">
+            <div id="deviceList" class="device-list">
+              <div style="text-align:center;padding:12px;color:var(--muted);font-size:12px">
+                Scanning for devices...
+              </div>
+            </div>
+            
+            <!-- Alternate Connection Methods -->
+            <div style="display:flex;gap:12px;margin-top:16px;padding-top:16px;border-top:2px solid #e3e6ef">
               <div style="flex:1">
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-                  <label style="font-size:11px;color:var(--muted);font-weight:600;margin:0">🔌 Wired Connection</label>
+                  <label style="font-size:11px;color:var(--muted);font-weight:600;margin:0">🔌 Alternate Wired COM Port</label>
                   <span id="wiredStatus" style="font-size:10px;padding:2px 8px;border-radius:4px;background:#e5e7eb;color:#6b7280">Disconnected</span>
                 </div>
                 <div style="display:flex;gap:8px;align-items:center">
@@ -103,18 +113,11 @@ select.input{cursor:pointer}
                 </div>
                 <div style="display:flex;gap:8px;align-items:center">
                   <select id="wifiNetworkSelect" class="input" style="flex:1;font-size:12px;padding:6px 8px">
-                    <option value="">Not Connected</option>
+                    <option value="">Select WiFi network...</option>
                   </select>
+                  <button id="btnWifiScanQuick" class="btn ghost sm" title="Scan for networks">🔄</button>
                   <button id="btnWifiConnect" class="btn primary sm">Connect</button>
                 </div>
-              </div>
-              <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
-                <button id="btnFirmwareTop" class="btn secondary" title="Check for Firmware Updates">Check for Firmware Updates</button>
-              </div>
-            </div>
-            <div id="deviceList" class="device-list">
-              <div style="text-align:center;padding:12px;color:var(--muted);font-size:12px">
-                Scanning for devices...
               </div>
             </div>
           </div>
@@ -344,22 +347,48 @@ async function scanDevices() {
     list.appendChild(item);
   });
   
-  // Populate COM port dropdown
-  const comSelect = $('#comPortSelect');
-  if (comSelect) {
-    comSelect.innerHTML = '<option value="">Select COM port...</option>';
-    ports.forEach(p => {
-      const option = document.createElement('option');
-      option.value = p.path;
-      option.textContent = p.label || p.path;
-      comSelect.appendChild(option);
-    });
-  }
+  // Populate alternate COM port dropdown with ALL ports
+  populateAlternateCOMPorts();
   
   } catch (err) {
     console.error('Device scan error:', err);
     const list = $('#deviceList');
     list.innerHTML = `<div style="text-align:center;padding:12px;color:#ef4444;font-size:12px">⚠️ Scan failed: ${err.message}<br><small>Try clicking Refresh or check console logs.</small></div>`;
+  }
+}
+
+// Populate alternate COM port dropdown with ALL available ports (unfiltered)
+async function populateAlternateCOMPorts() {
+  try {
+    const res = await fetch('/api/ports/all');
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    const allPorts = await res.json();
+    
+    const comSelect = $('#comPortSelect');
+    if (comSelect) {
+      comSelect.innerHTML = '<option value="">Select COM port...</option>';
+      allPorts.forEach(p => {
+        const option = document.createElement('option');
+        option.value = p.path;
+        const isConnected = connectedDevices.has(p.path);
+        // Show full label with manufacturer info
+        option.textContent = p.label || p.path;
+        if (isConnected) {
+          option.style.backgroundColor = '#d1fae5';
+          option.style.color = '#10b981';
+          option.style.fontWeight = '600';
+          option.selected = true;
+        }
+        comSelect.appendChild(option);
+      });
+      // Update select background if connected
+      if (currentDevice) {
+        comSelect.style.backgroundColor = '#d1fae5';
+      }
+      console.log(`✓ Populated alternate COM dropdown with ${allPorts.length} ports`);
+    }
+  } catch (err) {
+    console.error('Alternate COM port scan error:', err);
   }
 }
 
@@ -626,8 +655,11 @@ $('#btnSendAll').onclick = async () => {
 // ----- Modals -----
 
 $('#btnCloseWifi').onclick = () => $('#modalWifi').style.display = 'none';
+$('#btnCloseFirmware').onclick = () => $('#modalFirmware').style.display = 'none';
+$('#btnFirmwareTop').onclick = () => $('#modalFirmware').style.display = 'block';
 
-$('#btnScanNetworks').onclick = async () => {
+// Shared WiFi scan function
+async function scanWiFiNetworks() {
   log('📡 Scanning for WiFi networks...', 'info');
   try {
     const res = await fetch('/api/wifi-scan');
@@ -653,7 +685,10 @@ $('#btnScanNetworks').onclick = async () => {
   } catch (err) {
     log(`✗ Scan error: ${err.message}`, 'err');
   }
-};
+}
+
+$('#btnScanNetworks').onclick = scanWiFiNetworks;
+$('#btnWifiScanQuick').onclick = scanWiFiNetworks;
 
 $('#btnAddNetwork').onclick = () => {
   $('#modalAddNetwork').style.display = 'block';
@@ -1011,6 +1046,9 @@ setTimeout(async () => {
           wifiSelect.appendChild(option);
         });
       }
+      console.log(`✓ Auto-scan found ${data.ssids.length} WiFi networks`);
+    } else {
+      console.log('WiFi scan returned no networks:', data);
     }
   } catch (err) {
     console.log('WiFi scan on startup failed:', err);
