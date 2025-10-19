@@ -4,6 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>TDS-8 Control</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
 :root{--brand:#ff8800;--brand2:#8a2be2;--text:#222;--muted:#666;--card:#fff;--bg:#f6f7fb;--hover:#f0f1f5}
 *{box-sizing:border-box}
@@ -82,21 +83,45 @@ select.input{cursor:pointer}
             <button id="btnRefreshDevices" class="btn ghost sm" style="background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3);padding:4px 10px;font-size:11px">🔄 Refresh</button>
           </div>
           <div class="body">
+            <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:16px;padding:12px;background:#fafbff;border:2px solid #e3e6ef;border-radius:8px">
+              <div style="flex:1">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                  <label style="font-size:11px;color:var(--muted);font-weight:600;margin:0">🔌 Wired Connection</label>
+                  <span id="wiredStatus" style="font-size:10px;padding:2px 8px;border-radius:4px;background:#e5e7eb;color:#6b7280">Disconnected</span>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center">
+                  <select id="comPortSelect" class="input" style="flex:1;font-size:12px;padding:6px 8px">
+                    <option value="">Select COM port...</option>
+                  </select>
+                  <button id="btnWiredConnect" class="btn primary sm">Connect</button>
+                </div>
+              </div>
+              <div style="flex:1">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                  <label style="font-size:11px;color:var(--muted);font-weight:600;margin:0">📡 WiFi Connection</label>
+                  <span id="wifiStatus" style="font-size:10px;padding:2px 8px;border-radius:4px;background:#e5e7eb;color:#6b7280">Disconnected</span>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center">
+                  <select id="wifiNetworkSelect" class="input" style="flex:1;font-size:12px;padding:6px 8px">
+                    <option value="">Not Connected</option>
+                  </select>
+                  <button id="btnWifiConnect" class="btn primary sm">Connect</button>
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+                <button id="btnFirmwareTop" class="btn secondary" title="Check for Firmware Updates">Check for Firmware Updates</button>
+              </div>
+            </div>
             <div id="deviceList" class="device-list">
               <div style="text-align:center;padding:12px;color:var(--muted);font-size:12px">
                 Scanning for devices...
               </div>
             </div>
-            <div class="divider"></div>
-            <div style="display:flex;gap:8px;align-items:center">
-              <input id="manualComInput" class="input" placeholder="Enter COM port (e.g., COM5)" style="flex:1;font-size:12px;padding:6px 8px"/>
-              <button id="btnManualConnect" class="btn ghost sm">Connect COM</button>
-            </div>
           </div>
         </div>
 
         <!-- Track Names -->
-        <div class="card" style="margin-bottom:60px">
+        <div class="card">
           <div class="hdr"><h1>🎵 Track Names</h1></div>
           <div class="body">
             <!-- Offset Controls -->
@@ -116,26 +141,8 @@ select.input{cursor:pointer}
               <button id="btnRefresh" class="btn primary">🔄 Refresh from Ableton</button>
               <button id="btnReadTracks" class="btn secondary sm">Load Stored Tracks</button>
               <button id="btnSendAll" class="btn ghost sm">Update All Tracks</button>
-              <button id="btnResetTracks" class="btn ghost sm">Reset to Defaults</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Settings -->
-        <div class="card">
-          <div class="hdr"><h1>⚙️ Settings</h1></div>
-          <div class="body">
-            <div class="grid3">
-              <div class="icon-card" id="cardWifi">
-                <div class="icon">📡</div>
-                <h3>Wi-Fi</h3>
-                <p>Connect to network</p>
-              </div>
-              <div class="icon-card" id="cardFirmware">
-                <div class="icon">⬇️</div>
-                <h3>Firmware</h3>
-                <p>Update software</p>
-              </div>
+                            <button id="btnResetTracks" class="btn ghost sm">Reset to Defaults</button>
+              <button id="btnClearTracks" class="btn ghost sm">Clear</button>
             </div>
           </div>
         </div>
@@ -265,7 +272,7 @@ function saveSavedNetworks() {
 function log(msg, type = 'info') {
   const line = document.createElement('div');
   line.className = 'log-line ' + type;
-  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  line.textContent = msg;
   logEl.appendChild(line);
   logEl.scrollTop = logEl.scrollHeight;
 }
@@ -273,6 +280,19 @@ function log(msg, type = 'info') {
 function updateFooterSerial(serialNum) {
   deviceSerialNumber = serialNum || 'Unknown';
   $('#footerSerial').textContent = `Serial Number: ${deviceSerialNumber}`;
+}
+
+function updateConnectionStatus(connected) {
+  const statusEl = $('#statusText');
+  if (statusEl) {
+    if (connected) {
+      statusEl.textContent = '🔌 Connected';
+      statusEl.style.color = '#10b981';
+    } else {
+      statusEl.textContent = 'Disconnected';
+      statusEl.style.color = 'var(--muted)';
+    }
+  }
 }
 
 // ----- Device Management -----
@@ -323,6 +343,19 @@ async function scanDevices() {
     btn.onclick = () => isConnected ? disconnect(p.path) : connect(p.path, deviceName, p.serialNumber);
     list.appendChild(item);
   });
+  
+  // Populate COM port dropdown
+  const comSelect = $('#comPortSelect');
+  if (comSelect) {
+    comSelect.innerHTML = '<option value="">Select COM port...</option>';
+    ports.forEach(p => {
+      const option = document.createElement('option');
+      option.value = p.path;
+      option.textContent = p.label || p.path;
+      comSelect.appendChild(option);
+    });
+  }
+  
   } catch (err) {
     console.error('Device scan error:', err);
     const list = $('#deviceList');
@@ -343,6 +376,7 @@ async function connect(path, name, serialNum, retryCount = 0) {
       connectedDevices.set(path, { name, path, serialNum });
       currentDevice = path;
       updateFooterSerial(serialNum);
+      updateConnectionStatus(true);
       log(`✓ Connected to ${name || path}`, 'out');
       scanDevices();
     } else {
@@ -375,6 +409,23 @@ function disconnect(path) {
   if (currentDevice === path) {
     currentDevice = null;
     updateFooterSerial(null);
+    updateConnectionStatus(false);
+    // Reset wired connection UI
+    const wiredBtn = $('#btnWiredConnect');
+    const comSelect = $('#comPortSelect');
+    const wiredStatus = $('#wiredStatus');
+    if (wiredBtn) {
+      wiredBtn.textContent = 'Connect';
+      wiredBtn.className = 'btn primary sm';
+    }
+    if (comSelect) {
+      comSelect.style.backgroundColor = '';
+    }
+    if (wiredStatus) {
+      wiredStatus.textContent = 'Disconnected';
+      wiredStatus.style.background = '#e5e7eb';
+      wiredStatus.style.color = '#6b7280';
+    }
   }
   log(`✓ Disconnected from device - Serial port released for Arduino IDE`, 'info');
   scanDevices();
@@ -408,11 +459,37 @@ function buildTrackGrid() {
     input.name = `track-${i}`;
     input.value = `Track ${i + 1}`;
     input.placeholder = `Track ${i + 1}`;
+    input.oninput = () => saveLocalTrackNames();
     
     row.appendChild(label);
     row.appendChild(input);
     host.appendChild(row);
   }
+}
+
+// ----- Local persistence for Track Names -----
+function saveLocalTrackNames() {
+  const names = [];
+  for (let i = 0; i < 8; i++) {
+    const el = document.getElementById('tname' + i);
+    names.push(el ? el.value : '');
+  }
+  try { localStorage.setItem('tds8_tracknames', JSON.stringify(names)); } catch {}
+}
+
+function loadLocalTrackNames() {
+  try {
+    const raw = localStorage.getItem('tds8_tracknames');
+    if (!raw) return false;
+    const names = JSON.parse(raw);
+    if (!Array.isArray(names) || names.length !== 8) return false;
+    for (let i = 0; i < 8; i++) {
+      const el = document.getElementById('tname' + i);
+      if (el) el.value = names[i] || '';
+    }
+    log('✓ Loaded track names from localStorage', 'info');
+    return true;
+  } catch { return false; }
 }
 
 $('#btnReadTracks').onclick = async () => {
@@ -437,6 +514,17 @@ $('#btnReadTracks').onclick = async () => {
   } catch (err) {
     log(`✗ Error: ${err.message}`, 'err');
   }
+};
+
+$('#btnClearTracks').onclick = () => {
+  for (let i = 0; i < 8; i++) {
+    const inputElement = document.getElementById('tname' + i);
+    if (inputElement) {
+      inputElement.value = '';
+    }
+  }
+  log('Cleared track names for manual entry', 'info');
+  saveLocalTrackNames(); // Also save the cleared state
 };
 
 $('#btnResetTracks').onclick = () => {
@@ -530,30 +618,12 @@ $('#btnSendAll').onclick = async () => {
       await new Promise(r => setTimeout(r, 20));
     }
   }
+  // Save to localStorage after sending all
+  saveLocalTrackNames();
   log(`✓ Updated ${count} track names`, 'out');
 };
 
 // ----- Modals -----
-
-$('#cardWifi').onclick = async () => {
-  $('#modalWifi').style.display = 'block';
-  displayNetworkList();
-  
-  // Auto-scan for networks when modal opens
-  log('📡 Scanning for WiFi networks...', 'info');
-  try {
-    const res = await fetch('/api/wifi-scan');
-    const data = await res.json();
-    if (data.ok && data.ssids) {
-      scannedNetworks = data.ssids;
-      displayNetworkList();
-      log(`✓ Found ${data.ssids.length} networks`, 'out');
-    }
-  } catch (err) {
-    log(`✗ Scan error: ${err.message}`, 'err');
-  }
-};
-
 
 $('#btnCloseWifi').onclick = () => $('#modalWifi').style.display = 'none';
 
@@ -565,6 +635,17 @@ $('#btnScanNetworks').onclick = async () => {
     if (data.ok && data.ssids) {
       scannedNetworks = data.ssids;
       displayNetworkList();
+      // Also populate top bar dropdown
+      const wifiSelect = $('#wifiNetworkSelect');
+      if (wifiSelect) {
+        wifiSelect.innerHTML = '<option value="">Select WiFi network...</option>';
+        data.ssids.forEach(ssid => {
+          const option = document.createElement('option');
+          option.value = ssid;
+          option.textContent = ssid;
+          wifiSelect.appendChild(option);
+        });
+      }
       log(`✓ Found ${data.ssids.length} networks`, 'out');
     } else {
       log(`✗ Scan failed: ${data.error || 'Unknown error'}`, 'err');
@@ -579,9 +660,20 @@ $('#btnAddNetwork').onclick = () => {
 };
 $('#btnCancelAdd').onclick = () => $('#modalAddNetwork').style.display = 'none';
 
-$('#cardFirmware').onclick = () => {
-  $('#modalFirmware').style.display = 'block';
-};
+
+// Top bar Firmware button opens modal; if device connected, auto-run check
+const btnFwTop = $('#btnFirmwareTop');
+if (btnFwTop) {
+  btnFwTop.onclick = () => {
+    $('#modalFirmware').style.display = 'block';
+    // If connected, auto-check for updates
+    if (currentDevice) {
+      const btnCheck = $('#btnCheck');
+      if (btnCheck) btnCheck.click();
+    }
+  };
+}
+
 $('#btnCloseFirmware').onclick = () => $('#modalFirmware').style.display = 'none';
 
 // ----- Wi-Fi -----
@@ -669,6 +761,17 @@ async function connectToNetwork(ssid, password) {
   if (j.ok) {
     log(`✓ Connecting to "${ssid}"... (wired mode disabled)`, 'out');
     $('#modalWifi').style.display = 'none';
+    // Update WiFi status badge
+    const wifiStatus = $('#wifiStatus');
+    const wifiSelect = $('#wifiNetworkSelect');
+    if (wifiStatus) {
+      wifiStatus.textContent = 'Connected';
+      wifiStatus.style.background = '#10b981';
+      wifiStatus.style.color = '#fff';
+    }
+    if (wifiSelect) {
+      wifiSelect.style.backgroundColor = '#d1fae5';
+    }
   } else {
     log(`✗ Failed to join network: ${j.error}`, 'err');
   }
@@ -848,7 +951,17 @@ $('#btnClear').onclick = () => {
     }
     if (msg.type === 'serial-error') log(`✗ Serial error: ${msg.message}`, 'err');
     if (msg.type === 'device-version') log(`Device version: ${msg.version}`, 'info');
-    // OSC messages removed from browser log - check PowerShell console for OSC activity
+    
+    // OSC messages in Serial Monitor
+    if (msg.type === 'osc-sent') {
+      log(`Sent: ${msg.address}${msg.argsStr || ''}`, 'out');
+    }
+    if (msg.type === 'osc-received') {
+      const argsStr = msg.args && msg.args.length > 0 
+        ? ' [' + msg.args.map(a => a.value).join(', ') + ']' 
+        : '';
+      log(`Received: ${msg.address}${argsStr}`, 'info');
+    }
   };
   ws.onerror = () => log('✗ WebSocket connection error', 'err');
   ws.onclose = () => log('WebSocket disconnected', 'info');
@@ -877,11 +990,32 @@ async function loadStoredTrackNames() {
 loadSavedNetworks();
 buildTrackGrid();
 updateOffsetUI();
-// Don't auto-load on startup - use the default "Track 1" through "Track 8" values
-// User can click "Load Stored Tracks" button if they want to restore from device
-// loadStoredTrackNames();
+// Load track names from localStorage (instant restore of manual entries)
+loadLocalTrackNames();
 scanDevices();
 setInterval(scanDevices, 5000);
+// Auto-scan WiFi networks on startup
+setTimeout(async () => {
+  try {
+    const res = await fetch('/api/wifi-scan');
+    const data = await res.json();
+    if (data.ok && data.ssids) {
+      scannedNetworks = data.ssids;
+      const wifiSelect = $('#wifiNetworkSelect');
+      if (wifiSelect) {
+        wifiSelect.innerHTML = '<option value="">Select WiFi network...</option>';
+        data.ssids.forEach(ssid => {
+          const option = document.createElement('option');
+          option.value = ssid;
+          option.textContent = ssid;
+          wifiSelect.appendChild(option);
+        });
+      }
+    }
+  } catch (err) {
+    console.log('WiFi scan on startup failed:', err);
+  }
+}, 2000);
 log('TDS-8 Control ready', 'info');
 
 // Refresh Devices button
@@ -894,18 +1028,57 @@ if (refreshBtn) {
   };
 }
 
-// Manual COM connect wiring
-const manualBtn = document.getElementById('btnManualConnect');
-if (manualBtn) {
-  manualBtn.onclick = async () => {
-    const inp = document.getElementById('manualComInput');
-    const path = (inp && inp.value ? inp.value : '').trim();
-    if (!path) { log('✗ Enter a COM port (e.g., COM5)', 'err'); return; }
+// Wired connection button (top bar) - toggle connect/disconnect
+const wiredConnectBtn = document.getElementById('btnWiredConnect');
+if (wiredConnectBtn) {
+  wiredConnectBtn.onclick = async () => {
+    // Check if already connected
+    if (currentDevice) {
+      // Disconnect
+      await fetch('/api/disconnect', { method: 'POST' });
+      disconnect(currentDevice);
+      return;
+    }
+    
+    // Connect
+    const comSelect = document.getElementById('comPortSelect');
+    const path = comSelect ? comSelect.value : '';
+    if (!path) { 
+      log('✗ Select a COM port from the dropdown', 'err'); 
+      return; 
+    }
     try {
-      await connect(path, path, 'Manual');
+      const portName = path.split(/[/\\]/).pop();
+      await connect(path, portName, null);
+      // Update button and status to show connected state
+      wiredConnectBtn.textContent = 'Disconnect';
+      wiredConnectBtn.className = 'btn ghost sm';
+      comSelect.style.backgroundColor = '#d1fae5';
+      const wiredStatus = $('#wiredStatus');
+      if (wiredStatus) {
+        wiredStatus.textContent = 'Connected';
+        wiredStatus.style.background = '#10b981';
+        wiredStatus.style.color = '#fff';
+      }
     } catch (e) {
       log(`✗ Connect failed: ${e.message}`, 'err');
     }
+  };
+}
+
+// WiFi connection button (top bar)
+const wifiConnectBtn = document.getElementById('btnWifiConnect');
+if (wifiConnectBtn) {
+  wifiConnectBtn.onclick = async () => {
+    const wifiSelect = document.getElementById('wifiNetworkSelect');
+    const ssid = wifiSelect ? wifiSelect.value : '';
+    if (!ssid) {
+      log('✗ Select a WiFi network from the dropdown', 'err');
+      return;
+    }
+    // Open WiFi modal to enter password
+    $('#modalWifi').style.display = 'block';
+    $('#ssidInput').value = ssid;
   };
 }
 </script>

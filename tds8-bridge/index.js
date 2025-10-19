@@ -59,6 +59,9 @@ function initOSC() {
     return udpPort;
 }
 
+// Track device IP for WiFi mode
+let deviceIP = "127.0.0.1"; // Default to localhost for wired mode
+
 // Send OSC message to Ableton
 function sendOSC(address, args = []) {
     const port = initOSC();
@@ -67,9 +70,17 @@ function sendOSC(address, args = []) {
             port.send({
                 address: address,
                 args: args
-            }, "127.0.0.1", 9000);
+            }, deviceIP, 9000); // Use tracked device IP (localhost or WiFi IP)
             const argsStr = args.length > 0 ? ' [' + args.map(a => a.value || a).join(', ') + ']' : '';
-            console.log(`Sent to Ableton: ${address}${argsStr}`);
+            console.log(`Sent to Ableton (${deviceIP}): ${address}${argsStr}`);
+            
+            // Broadcast to browser UI
+            wsBroadcast({ 
+                type: 'osc-sent', 
+                address: address, 
+                args: args,
+                argsStr: argsStr
+            });
         } catch (err) {
             console.error(`OSC send error (${address}):`, err.message);
         }
@@ -138,15 +149,32 @@ function initOSCListener() {
                 
                 wsBroadcast({ type: 'osc-received', from: `${fromIP}:${fromPort}`, address: oscMsg.address, args: oscMsg.args });
                 
+                // Handle /ipupdate from device (when it connects to WiFi)
+                if (oscMsg.address === "/ipupdate" && oscMsg.args.length > 0) {
+                    const newIP = oscMsg.args[0].value;
+                    if (newIP && newIP !== deviceIP) {
+                        deviceIP = newIP;
+                        console.log(`📡 Device IP updated: ${deviceIP}`);
+                        wsBroadcast({ type: 'device-ip', ip: deviceIP });
+                        // Forward to M4L so it knows device IP
+                        broadcastIPUpdate();
+                    }
+                    return;
+                }
+                
                 // Handle /hi response to our /hello
                 if (oscMsg.address === "/hi") {
                     lastHelloResponse = Date.now();
-                    if (!abletonConnected) {
-                        abletonConnected = true;
+                    const wasConnected = abletonConnected;
+                    abletonConnected = true;
+                    
+                    // Send /ableton_on EVERY time we get /hi (triggers heartbeat flash)
+                    try {
+                        if (serial && serial.isOpen) send('/ableton_on\n');
+                    } catch (err) {}
+                    
+                    if (!wasConnected) {
                         console.log('✓ Ableton CONNECTED');
-                        try {
-                            if (serial && serial.isOpen) send('/ableton_on\n');
-                        } catch (err) {}
                     }
                     return;
                 }
@@ -204,10 +232,10 @@ function broadcastIPUpdate() {
         
         const message = {
             address: "/ipupdate",
-            args: [{ type: "s", value: "127.0.0.1" }]
+            args: [{ type: "s", value: deviceIP }] // Send actual device IP (not hardcoded localhost)
         };
         port.send(message, "127.0.0.1", 9000);
-        console.log("📡 OSC Sender: 127.0.0.1:9001 → 127.0.0.1:9000 /ipupdate 127.0.0.1");
+        console.log(`📡 Sent to M4L: /ipupdate ${deviceIP}`);
     } catch (err) {
         console.error("Broadcast error:", err.message);
     }
@@ -216,6 +244,11 @@ function broadcastIPUpdate() {
 app.use(express.json({ limit: '10mb' }));
 app.use(morgan('dev'));
 app.use(express.static(path.join(__dirname, 'web')));
+
+// Redirect old favicon.ico requests to favicon.svg
+app.get('/favicon.ico', (req, res) => {
+  res.redirect(301, '/favicon.svg');
+});
 
 // Explicit root route handler as fallback
 app.get('/', (req, res) => {
@@ -287,18 +320,48 @@ app.get('/api/ports', async (_req, res) => {
     manufacturer: p.manufacturer
   })));
   
-  // Filter for TDS-8 devices (XIAO ESP32-C3 only)
+  // Filter for TDS-8 devices (XIAO ESP32-C3 preferred)
   const tds8Devices = ports.filter(p => {
     const vid = (p.vendorId || '').toUpperCase();
     const pid = (p.productId || '').toUpperCase();
-    return vid === '303A' && pid === '1001';
+    const manu = (p.manufacturer || '').toLowerCase();
+    // Match specific VID/PID for ESP32-C3, or common Arduino names
+    return (vid === '303A' && pid === '1001') || manu.includes('arduino') || manu.includes('tds-8');
   });
-  
-  console.log(`✓ Filtered devices (VID=303A, PID=1001): ${tds8Devices.length} found`);
-  
-  const decorated = tds8Devices.map(p => ({
+
+  let list = tds8Devices;
+  if (list.length === 0) {
+    // Fallback: return all ports so user can choose manually
+    console.log('⚠️ No VID/PID match; falling back to all serial ports');
+    list = ports;
+    // On Windows, if still empty, try PowerShell discovery of COM ports
+    if (list.length === 0 && process.platform === 'win32') {
+      try {
+        await new Promise((resolve) => {
+          const cmd = 'powershell -NoProfile -Command "try { Get-CimInstance Win32_SerialPort | Select-Object -ExpandProperty DeviceID } catch { try { Get-WmiObject Win32_SerialPort | Select-Object -ExpandProperty DeviceID } catch {} }"';
+          exec(cmd, { windowsHide: true }, (err, stdout) => {
+            if (!err && stdout) {
+              const lines = stdout.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+              const extra = lines.filter(s => /^COM\d+$/i.test(s)).map(id => ({ path: id }));
+              if (extra.length > 0) {
+                console.log('➕ Discovered COM ports via PowerShell:', extra.map(e => e.path));
+                list = extra;
+              }
+            }
+            resolve();
+          });
+        });
+      } catch (e) {
+        console.log('PowerShell COM discovery skipped:', e.message);
+      }
+    }
+  } else {
+    console.log(`✓ Filtered devices (VID=303A, PID=1001): ${tds8Devices.length} found`);
+  }
+
+  const decorated = list.map(p => ({
     path: p.path,
-    label: p.path,
+    label: [p.manufacturer, p.path].filter(Boolean).join(' - ') || p.path,
     vendorId: p.vendorId || '',
     productId: p.productId || '',
     serialNumber: p.serialNumber || '',
@@ -418,10 +481,22 @@ app.get('/api/wifi-scan', (_req, res) => {
 });
 
 // GET /tracks - Return current track names for Ableton M4L
+// Persist names to disk so they survive server restarts
+const TRACK_NAMES_PATH = path.join(__dirname, 'tracknames.json');
 let currentTrackNames = [
   'Track 1', 'Track 2', 'Track 3', 'Track 4',
   'Track 5', 'Track 6', 'Track 7', 'Track 8'
 ];
+try {
+  const raw = fs.readFileSync(TRACK_NAMES_PATH, 'utf8');
+  const parsed = JSON.parse(raw);
+  if (Array.isArray(parsed) && parsed.length === 8) {
+    currentTrackNames = parsed.map(v => (typeof v === 'string' ? v : String(v || '')));
+    console.log('✓ Loaded track names from disk');
+  }
+} catch (e) {
+  // No file yet or parse error; keep defaults silently
+}
 
 app.get('/tracks', (_req, res) => {
   res.json({ names: currentTrackNames });
@@ -471,6 +546,8 @@ app.post('/api/trackname', (req, res) => {
     });
     
     send(cmd);
+    // Persist asynchronously; ignore errors
+    try { fs.promises.writeFile(TRACK_NAMES_PATH, JSON.stringify(currentTrackNames, null, 2), 'utf8'); } catch {}
     res.json({ ok: true });
   } catch (e) { 
     console.error('❌ /api/trackname error:', e);
