@@ -187,6 +187,15 @@ function initOSCListener() {
                     
                     if (!wasConnected) {
                         console.log('✓ Ableton CONNECTED');
+                        
+                        // Send /reannounce to M4L via OSC to request track names
+                        setTimeout(() => {
+                            try {
+                                sendOSC('/reannounce', []);
+                            } catch (err) {
+                                console.error('Failed to send /reannounce:', err.message);
+                            }
+                        }, 1000);
                     }
                     return;
                 }

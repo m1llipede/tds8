@@ -166,7 +166,13 @@ select.input{cursor:pointer}
       <!-- Right Column - Serial Monitor -->
       <div class="right-col">
         <div class="card flex">
-          <div class="hdr"><h1>📟 Serial Monitor</h1></div>
+          <div class="hdr">
+            <h1>📟 Serial Monitor</h1>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-left:auto;cursor:pointer">
+              <input type="checkbox" id="autoScroll" checked style="cursor:pointer"/>
+              Auto-scroll
+            </label>
+          </div>
           <div class="body flex">
             <div id="log" class="log"></div>
             <div style="margin-top:10px;display:flex;gap:8px">
@@ -318,7 +324,12 @@ function log(msg, type = 'info') {
   line.className = 'log-line ' + type;
   line.textContent = msg;
   logEl.appendChild(line);
-  logEl.scrollTop = logEl.scrollHeight;
+  
+  // Only auto-scroll if checkbox is checked
+  const autoScroll = $('#autoScroll');
+  if (autoScroll && autoScroll.checked) {
+    logEl.scrollTop = logEl.scrollHeight;
+  }
 }
 
 function updateFooterSerial(serialNum) {
@@ -1133,6 +1144,38 @@ async function checkDeviceStatus() {
     const data = await res.json();
     if (data.ok && data.connectionType !== 'none') {
       updateConnectionBanner(data.connectionType, data.ip);
+      
+      const wifiStatus = $('#wifiStatus');
+      const wifiSelect = $('#wifiNetworkSelect');
+      const wiredStatus = $('#wiredStatus');
+      const wiredBtn = $('#btnWiredConnect');
+      const comSelect = $('#comPortSelect');
+      
+      if (data.connectionType === 'wifi') {
+        // Update WiFi UI
+        if (wifiStatus) {
+          wifiStatus.textContent = 'Connected';
+          wifiStatus.style.background = '#10b981';
+          wifiStatus.style.color = '#fff';
+        }
+        if (wifiSelect) {
+          wifiSelect.style.backgroundColor = '#d1fae5';
+        }
+        // Clear wired UI
+        if (wiredStatus) {
+          wiredStatus.textContent = 'Disconnected';
+          wiredStatus.style.background = '#e5e7eb';
+          wiredStatus.style.color = '#6b7280';
+        }
+        if (wiredBtn) {
+          wiredBtn.textContent = 'Connect';
+          wiredBtn.className = 'btn primary sm';
+        }
+        if (comSelect) {
+          comSelect.style.backgroundColor = '';
+        }
+      }
+      
       log(`Device already connected: ${data.connectionType} (${data.ip})`, 'info');
     }
   } catch (e) {

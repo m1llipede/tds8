@@ -327,18 +327,14 @@ void setup() {
     Serial.println("🚀 Wired mode active - logo displayed");
     
     // No HTTP server, no OSC, no WiFi - just serial
-    Serial.println("✅ Ready for serial commands");
-    Serial.println("📋 Commands: VERSION, WIFI_ON, /trackname, /activetrack");
+    // Ready for serial commands
     return;  // Skip all WiFi setup
   }
   
   // WiFi mode: show splash then instructions
   currentState = STATE_STARTUP_SPLASH;
   stateTransitionTime = millis() + 3000; // Hold splash for 3 seconds
-  Serial.println("🚀 Kicking off WiFi startup sequence...");
-
   // ========== WIFI MODE ==========
-  Serial.println("📡 WIFI MODE - Starting WiFi...");
   
   WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
@@ -388,17 +384,16 @@ void setup() {
 
   // Connected?
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println(String("✅ Wi-Fi connected. IP: ") + WiFi.localIP().toString());
+    // WiFi connected
     showNetworkSplash(WiFi.localIP().toString());
     startRescueAP();  // Keep rescue AP for a window
   } else {
-    Serial.println("⚠️ Wi-Fi NOT connected; Rescue AP should be up.");
+    // WiFi not connected
     if (!WiFi.softAPgetStationNum()) startRescueAP();
   }
 
   // mDNS + HTTP
-  if (MDNS.begin(mdnsName)) Serial.println("🌐 mDNS: http://tds8.local");
-  else                      Serial.println("⚠️ mDNS failed");
+  MDNS.begin(mdnsName);
 
   // HTTP routes
   server.on("/",             HTTP_GET,  handleRoot);
@@ -821,7 +816,7 @@ void handleTrackName(OSCMessage &msg) {
     trackNames[idx] = incoming;
     actualTrackNumbers[idx] = actualTrack;
     drawTrackName(idx, trackNames[idx]);
-    Serial.printf("✅ /trackname %d '%s' (track %d)\n", idx, buf, actualTrack);
+    Serial.printf("RECV: /trackname %d '%s'\n", idx, buf);
   }
 }
 
@@ -833,14 +828,14 @@ void handleActiveTrack(OSCMessage &msg) {
   activeTrack = idx;
   if (old >= 0) drawTrackName(old, trackNames[old]);
   drawTrackName(activeTrack, trackNames[activeTrack]);
-  Serial.printf("🎯 /activetrack %d\n", idx);
+  Serial.printf("RECV: /activetrack %d\n", idx);
 }
 
 void handleReannounceOSC(OSCMessage &msg) { broadcastIP(); }
 
 void handleHi(OSCMessage &msg) {
   // Received /hi from M4L - Ableton is connected
-  Serial.println("📡 Received /hi from M4L - Ableton connected");
+  Serial.println("RECV: /hi");
   if (!abletonBannerShown) {
     showAbletonConnectedAll();
     abletonBannerShown = true;
@@ -859,7 +854,7 @@ void sendHelloToM4L() {
   msg.send(Udp);
   Udp.endPacket();
   
-  Serial.printf("📡 Sent /hello to %s:9000\n", bcast.toString().c_str());
+  Serial.println("SENT: /hello");
 }
 
 // =====================  HTTP endpoints  ===================
@@ -1366,7 +1361,7 @@ void broadcastIP() {
   m.add(s.c_str());
   Udp.beginPacket(bcast, ipBroadcastPort); m.send(Udp); Udp.endPacket();
   delay(0);
-  Serial.printf("🔊 Announce: %s → %s:%d\n", s.c_str(), bcast.toString().c_str(), ipBroadcastPort);
+  // Silent IP announcement
 }
 
 // ======================  Forget Wi-Fi  =======================
@@ -1446,11 +1441,13 @@ void showStartupSplash() {
   tcaSelect(7);
   display.invertDisplay(false);
   display.clearDisplay();
+  display.display(); // Ensure clear is applied
+  delay(10);
   display.setTextWrap(false);
   display.setTextColor(SSD1306_WHITE);
   display.drawBitmap(0, 0, playoptix_logo, LOGO_WIDTH, LOGO_HEIGHT, SSD1306_WHITE);
   // Add a black rectangle at the bottom to cover any graphical artifacts
-  display.fillRect(0, 56, 128, 8, SSD1306_BLACK);
+  display.fillRect(0, 54, 128, 10, SSD1306_BLACK);
   display.display();
 }
 
@@ -1545,8 +1542,10 @@ void showQuickStartInstructions() {
   // Display 7 (OLED 8) - Show PlayOptix logo
   tcaSelect(7);
   display.clearDisplay();
+  display.display(); // Ensure clear is applied
+  delay(10);
   display.drawBitmap(0, 0, playoptix_logo, LOGO_WIDTH, LOGO_HEIGHT, SSD1306_WHITE);
-  display.fillRect(0, 56, 128, 8, SSD1306_BLACK); // Cover artifacts at bottom
+  display.fillRect(0, 54, 128, 10, SSD1306_BLACK); // Cover artifacts at bottom
   display.display();
 }
 
@@ -1717,14 +1716,14 @@ void handleSerialLine(const String& line) {
       // Just redraw OLED 8 to show heartbeat
       drawTrackName(7, trackNames[7]);
     }
-    Serial.println("OK: Ableton connected");
+    // Ableton connected
     return;
   }
 
   // /ableton_off - Ableton disconnected
   if (cmd.startsWith("/ableton_off")) {
     abletonConnected = false;
-    Serial.println("OK: Ableton disconnected");
+    // Ableton disconnected
     // Show disconnect message on all screens
     for (int i = 0; i < numScreens; i++) {
       tcaSelect(i);
@@ -1746,9 +1745,9 @@ void handleSerialLine(const String& line) {
   if (cmd.startsWith("/reannounce")) {
     if (!wiredOnly && WiFi.status() == WL_CONNECTED) {
       broadcastIP();
-      Serial.println("OK: /reannounce (IP broadcast sent)");
+      Serial.println("SENT: /reannounce");
     } else {
-      Serial.println("OK: /reannounce (wired mode, no broadcast)");
+      Serial.println("SENT: /reannounce");
     }
     return;
   }
