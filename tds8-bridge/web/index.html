@@ -141,13 +141,13 @@ select.input{cursor:pointer}
           <div class="body">
             <!-- Offset Controls -->
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:12px;background:#fafbff;border-radius:8px;border:2px solid #e3e6ef">
-              <button id="btnOffsetLeft" class="btn ghost sm" title="Previous 8 tracks">◀</button>
+              <button id="btnOffsetLeft" class="btn ghost sm" title="Previous track">◀</button>
               <div style="flex:1;text-align:center">
                 <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Track Offset</div>
                 <div style="font-size:18px;font-weight:600;color:var(--brand)" id="offsetDisplay">0</div>
                 <div style="font-size:10px;color:var(--muted);margin-top:2px">Showing tracks <span id="offsetRange">1-8</span></div>
               </div>
-              <button id="btnOffsetRight" class="btn ghost sm" title="Next 8 tracks">▶</button>
+              <button id="btnOffsetRight" class="btn ghost sm" title="Next track">▶</button>
             </div>
             
             <div class="trackgrid" id="tracks"></div>
@@ -276,12 +276,15 @@ let currentConnectionIP = '—';
 
 // Update connection status banner
 function updateConnectionBanner(type, ip) {
+  console.log(`🔄 updateConnectionBanner called: type=${type}, ip=${ip}`);
   currentConnectionType = type;
   currentConnectionIP = ip || '—';
   
   const typeEl = $('#connectionType');
   const ipEl = $('#connectionIP');
   const banner = $('#connectionBanner');
+  
+  console.log(`🔍 Elements found: typeEl=${!!typeEl}, ipEl=${!!ipEl}, banner=${!!banner}`);
   
   if (type === 'wired') {
     typeEl.textContent = '🔌 Wired (USB)';
@@ -301,6 +304,7 @@ function updateConnectionBanner(type, ip) {
   }
   
   ipEl.textContent = currentConnectionIP;
+  console.log(`✅ Banner updated: ${typeEl.textContent} - ${ipEl.textContent}`);
 }
 
 // Load saved networks from localStorage
@@ -612,11 +616,11 @@ $('#btnResetTracks').onclick = () => {
 
 // Offset controls
 $('#btnOffsetLeft').onclick = () => {
-  currentOffset = Math.max(0, currentOffset - 8);
+  currentOffset = Math.max(0, currentOffset - 1);
   updateOffsetUI();
 };
 $('#btnOffsetRight').onclick = () => {
-  currentOffset = currentOffset + 8;
+  currentOffset = currentOffset + 1;
   updateOffsetUI();
 };
 
@@ -1053,9 +1057,64 @@ $('#cmd').onkeypress = (e) => {
     if (msg.type === 'serial-open') {
       log(`✓ Serial port opened: ${msg.path}`, 'out');
       scanDevices();
+      // Check device status after serial opens
+      setTimeout(() => checkDeviceStatus(), 1000);
     }
     if (msg.type === 'serial-error') log(`✗ Serial error: ${msg.message}`, 'err');
     if (msg.type === 'device-version') log(`Device version: ${msg.version}`, 'info');
+    
+    // Handle device mode update (on startup)
+    if (msg.type === 'device-mode') {
+      updateConnectionBanner(msg.mode, msg.ip);
+      
+      const wifiStatus = $('#wifiStatus');
+      const wifiSelect = $('#wifiNetworkSelect');
+      const wiredStatus = $('#wiredStatus');
+      const wiredBtn = $('#btnWiredConnect');
+      const comSelect = $('#comPortSelect');
+      
+      if (msg.mode === 'wifi') {
+        // Device is in WiFi mode
+        if (wifiStatus) {
+          wifiStatus.textContent = 'Connected';
+          wifiStatus.style.background = '#10b981';
+          wifiStatus.style.color = '#fff';
+        }
+        if (wifiSelect) {
+          wifiSelect.style.backgroundColor = '#d1fae5';
+        }
+        if (wiredStatus) {
+          wiredStatus.textContent = 'Disconnected';
+          wiredStatus.style.background = '#e5e7eb';
+          wiredStatus.style.color = '#6b7280';
+        }
+        if (wiredBtn) {
+          wiredBtn.textContent = 'Connect';
+          wiredBtn.className = 'btn primary sm';
+        }
+        if (comSelect) {
+          comSelect.style.backgroundColor = '';
+        }
+      } else {
+        // Device is in Wired mode
+        if (wiredStatus) {
+          wiredStatus.textContent = 'Connected';
+          wiredStatus.style.background = '#10b981';
+          wiredStatus.style.color = '#fff';
+        }
+        if (comSelect) {
+          comSelect.style.backgroundColor = '#d1fae5';
+        }
+        if (wifiStatus) {
+          wifiStatus.textContent = 'Disconnected';
+          wifiStatus.style.background = '#e5e7eb';
+          wifiStatus.style.color = '#6b7280';
+        }
+        if (wifiSelect) {
+          wifiSelect.style.backgroundColor = '';
+        }
+      }
+    }
     
     // OSC messages in Serial Monitor
     if (msg.type === 'osc-sent') {
@@ -1070,6 +1129,7 @@ $('#cmd').onkeypress = (e) => {
     
     // Handle device IP update (WiFi connection)
     if (msg.type === 'device-ip') {
+      console.log('📡 Received device-ip:', msg);
       const wifiStatus = $('#wifiStatus');
       const wifiSelect = $('#wifiNetworkSelect');
       const wiredStatus = $('#wiredStatus');
@@ -1081,6 +1141,7 @@ $('#cmd').onkeypress = (e) => {
         log(`✅ Device connected to WiFi: ${msg.ip}${msg.ssid ? ' (' + msg.ssid + ')' : ''}`, 'out');
         
         // Update connection banner
+        console.log('📡 Updating banner to WiFi:', msg.ip);
         updateConnectionBanner('wifi', msg.ip);
         
         if (wifiStatus) {
@@ -1173,6 +1234,25 @@ async function checkDeviceStatus() {
         }
         if (comSelect) {
           comSelect.style.backgroundColor = '';
+        }
+      } else if (data.connectionType === 'wired') {
+        // Update Wired UI
+        if (wiredStatus) {
+          wiredStatus.textContent = 'Connected';
+          wiredStatus.style.background = '#10b981';
+          wiredStatus.style.color = '#fff';
+        }
+        if (comSelect) {
+          comSelect.style.backgroundColor = '#d1fae5';
+        }
+        // Clear WiFi UI
+        if (wifiStatus) {
+          wifiStatus.textContent = 'Disconnected';
+          wifiStatus.style.background = '#e5e7eb';
+          wifiStatus.style.color = '#6b7280';
+        }
+        if (wifiSelect) {
+          wifiSelect.style.backgroundColor = '';
         }
       }
       
@@ -1283,9 +1363,19 @@ if (wifiConnectBtn) {
       return;
     }
     
-    // Prompt for password
-    const password = prompt(`Enter password for WiFi network "${ssid}":\n\n(Leave blank if no password)`);
-    if (password === null) return; // User cancelled
+    // Check if network is already saved
+    const savedNetwork = savedWifiNetworks.find(n => n.ssid === ssid);
+    let password;
+    
+    if (savedNetwork) {
+      // Use saved password
+      password = savedNetwork.password;
+      log(`📡 Using saved password for "${ssid}"`, 'info');
+    } else {
+      // Prompt for password
+      password = prompt(`Enter password for WiFi network "${ssid}":\n\n(Leave blank if no password)`);
+      if (password === null) return; // User cancelled
+    }
     
     log(`📡 Configuring TDS-8 to connect to "${ssid}"...`, 'info');
     log('⚠️ Device will disconnect from USB and switch to WiFi mode', 'info');

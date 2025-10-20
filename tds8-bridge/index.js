@@ -21,10 +21,11 @@ const OTA_MANIFEST_URL = process.env.OTA_MANIFEST_URL || '';
 const FW_FEED_URL = process.env.FW_FEED_URL || '';
 
 const Bindings = autoDetect();
-let serial = null;
-let serialPath = null;
-let serialBuf = '';
-let deviceVersion = null;
+
+// Multi-device support: Store up to 4 TDS-8 devices
+const MAX_DEVICES = 4;
+let devices = []; // Array of { id, serial, path, buffer, version, deviceID }
+let deviceVersion = null; // Legacy - for backward compatibility
 
 const app = express();
 const server = http.createServer(app);
@@ -110,10 +111,10 @@ function initOSCListener() {
                 console.log('>>> Handshake check...');
                 sendOSC('/hello', []);
                 
-                // Check if we got /hi in last 15 seconds
+                // Check if we got /hi in last 30 seconds
                 const now = Date.now();
                 const wasConnected = abletonConnected;
-                abletonConnected = (now - lastHelloResponse) < 15000;
+                abletonConnected = (now - lastHelloResponse) < 30000;
                 
                 if (wasConnected !== abletonConnected) {
                     console.log(`${abletonConnected ? '✓ Ableton CONNECTED' : '✗ Ableton DISCONNECTED'}`);
@@ -260,18 +261,35 @@ function initDeviceListener() {
                     
                     console.log(`RECV: /ipupdate ${newIP} (from device)`);
                     
-                    if (newIP && newIP !== deviceIP) {
+                    if (newIP) {
+                        const changed = newIP !== deviceIP;
                         deviceIP = newIP;
                         
+                        const connectionType = newIP === '127.0.0.1' ? 'wired' : 'wifi';
+                        console.log(`📡 Broadcasting device-ip to UI: ${connectionType} @ ${deviceIP}`);
+                        
+                        // Always broadcast to UI (even if IP didn't change, UI might need update)
                         wsBroadcast({ 
                             type: 'device-ip', 
                             ip: deviceIP,
                             ssid: ssid,
-                            connectionType: newIP === '127.0.0.1' ? 'wired' : 'wifi'
+                            connectionType: connectionType
                         });
                         
-                        // Forward to M4L
-                        broadcastIPUpdate();
+                        // Forward to M4L only if IP changed
+                        if (changed) {
+                            broadcastIPUpdate();
+                            
+                            // Send /reannounce to M4L to request track names
+                            setTimeout(() => {
+                                try {
+                                    sendOSC('/reannounce', []);
+                                    console.log('SENT: /reannounce (after WiFi connection)');
+                                } catch (err) {
+                                    console.error('Failed to send /reannounce:', err.message);
+                                }
+                            }, 2000);
+                        }
                     }
                 }
             });
@@ -387,6 +405,22 @@ function onSerialData(chunk) {
     }
     const m = /^VERSION\s*[:=]\s*([\w.\-]+)/i.exec(line);
     if (m) { deviceVersion = m[1]; wsBroadcast({ type: 'device-version', version: deviceVersion }); }
+    
+    // Parse MODE: WIRED or MODE: WIFI
+    const modeMatch = /^MODE\s*[:=]\s*(WIRED|WIFI)/i.exec(line);
+    if (modeMatch) {
+      const mode = modeMatch[1].toUpperCase();
+      const connectionType = mode === 'WIRED' ? 'wired' : 'wifi';
+      if (mode === 'WIRED') {
+        deviceIP = '127.0.0.1';
+      }
+      // For WiFi mode, keep existing deviceIP or wait for /ipupdate
+      wsBroadcast({ 
+        type: 'device-mode', 
+        mode: connectionType,
+        ip: mode === 'WIRED' ? '127.0.0.1' : (deviceIP || 'Connecting...')
+      });
+    }
   }
 }
 

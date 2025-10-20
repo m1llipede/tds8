@@ -305,7 +305,13 @@ void setup() {
   loadTrackNames();
   // Load saved wired mode preference (defaults to true if never set)
   loadWiredMode();
-  Serial.printf("🔧 Mode on boot: %s (saved preference)\n", wiredOnly ? "WIRED" : "WiFi");
+  
+  // Send mode status - if WiFi mode and already connected, include IP
+  if (wiredOnly) {
+    Serial.println("MODE: WIRED");
+  } else {
+    Serial.println("MODE: WIFI");
+  }
 
   Serial.printf("VERSION: %s\n", FW_VERSION);
   Serial.printf("BUILD: %s\n", FW_BUILD);
@@ -482,11 +488,40 @@ void loop() {
       if (WiFi.status() == WL_CONNECTED) {
         WiFi.softAPdisconnect(true);
         rescueAP = false;
-        Serial.println("🛟 Rescue AP stopped (STA connected)");
+        // Rescue AP stopped - WiFi connected
+        
+        // Wait a moment for bridge to be ready, then broadcast IP multiple times
+        delay(1000);
+        broadcastIP();
+        delay(500);
+        broadcastIP();
+        delay(500);
+        broadcastIP();
+        
+        // Send /reannounce to M4L to request track names (twice for reliability)
+        delay(1000);
+        IPAddress gw = WiFi.gatewayIP();
+        IPAddress bcast(gw[0], gw[1], gw[2], 255);
+        
+        // First attempt
+        OSCMessage reannounce1("/reannounce");
+        Udp.beginPacket(bcast, 9000);
+        reannounce1.send(Udp);
+        Udp.endPacket();
+        Serial.println("SENT: /reannounce");
+        
+        // Second attempt after delay
+        delay(1000);
+        OSCMessage reannounce2("/reannounce");
+        Udp.beginPacket(bcast, 9000);
+        reannounce2.send(Udp);
+        Udp.endPacket();
+        Serial.println("SENT: /reannounce");
       } else if (RESCUE_AP_MAX_MS > 0 && (long)(millis() - rescueStopAt) >= 0) {
         WiFi.softAPdisconnect(true);
         rescueAP = false;
-        Serial.println("🛟 Rescue AP stopped (timeout)");
+        // Rescue AP stopped
+        broadcastIP();
       }
     }
 
@@ -661,17 +696,6 @@ void drawTrackName(uint8_t screen, const String& name) {
       drawSingleLine(l, ts);
     }
   }
-
-  // Draw actual track number at bottom (small text)
-  display.setTextSize(1);
-  String trackNumStr = "Track " + String(actualTrackNumbers[screen] + 1); // "Track 1", "Track 2", etc.
-  int16_t x1, y1;
-  uint16_t w, h;
-  display.getTextBounds(trackNumStr, 0, 0, &x1, &y1, &w, &h);
-  int trackNumX = (SCREEN_WIDTH - w) / 2;
-  int trackNumY = SCREEN_HEIGHT - h - 3; // 3 pixels from bottom
-  display.setCursor(trackNumX, trackNumY);
-  display.println(trackNumStr);
 
   // Heartbeat indicator on OLED 8 (screen 7) - upper right corner
   // Shows when Ableton responds with /hi (every 10 seconds when handshake active)
@@ -1361,7 +1385,7 @@ void broadcastIP() {
   m.add(s.c_str());
   Udp.beginPacket(bcast, ipBroadcastPort); m.send(Udp); Udp.endPacket();
   delay(0);
-  // Silent IP announcement
+  Serial.printf("SENT: /ipupdate %s\n", s.c_str());
 }
 
 // ======================  Forget Wi-Fi  =======================
@@ -1723,20 +1747,8 @@ void handleSerialLine(const String& line) {
   // /ableton_off - Ableton disconnected
   if (cmd.startsWith("/ableton_off")) {
     abletonConnected = false;
-    // Ableton disconnected
-    // Show disconnect message on all screens
-    for (int i = 0; i < numScreens; i++) {
-      tcaSelect(i);
-      display.clearDisplay();
-      display.setTextSize(1);
-      display.setTextColor(SSD1306_WHITE);
-      display.setCursor(10, 24);
-      display.println("Ableton");
-      display.setCursor(4, 36);
-      display.println("Disconnected");
-      display.display();
-    }
-    showingDisconnectMessage = true;
+    // Don't show disconnect message - it causes false positives
+    // Just update the connection flag
     return;
   }
 
