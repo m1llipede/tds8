@@ -71,11 +71,7 @@ select.input{cursor:pointer}
 </style>
 </head>
 <body>
-  <div id="splash" style="position:fixed;z-index:9999;top:0;left:0;width:100vw;height:100vh;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;">
-    <img src="tds8-logo.png" alt="TDS-8 Logo" style="max-width:200px;margin-bottom:24px;">
-    <img src="playoptix-logo.png" alt="Playoptix Logo" style="max-width:160px;">
-  </div>
-  <div class="wrap" style="display:none;" id="mainApp">
+  <div class="wrap" style="display:block;" id="mainApp">
     <!-- Connection Status Banner -->
     <div id="connectionBanner" style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:12px 20px;margin-bottom:16px;border-radius:8px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,0.1)">
       <div style="display:flex;align-items:center;gap:16px">
@@ -144,16 +140,8 @@ select.input{cursor:pointer}
           <div class="hdr" style="display:flex;justify-content:space-between;align-items:center"><h1>🎵 Track Names</h1></div>
           <div class="body" style="display:flex;flex-direction:column;min-height:0;max-height:500px;overflow-y:auto;">
             <div class="btn-group" id="trackBtnGroup" style="margin-bottom:12px"></div>
-            <!-- Offset Controls -->
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:6px 10px;background:#fafbff;border-radius:8px;border:1.5px solid #e3e6ef;max-width:340px;align-self:center;">
-              <button id="btnOffsetLeft" class="btn ghost sm" title="Previous track">◀</button>
-              <div style="flex:1;text-align:center">
-                <div style="font-size:10px;color:var(--muted);margin-bottom:2px">Track Offset</div>
-                <div style="font-size:15px;font-weight:600;color:var(--brand)" id="offsetDisplay">0</div>
-                <div style="font-size:9px;color:var(--muted);margin-top:1px">Showing tracks <span id="offsetRange">1-8</span></div>
-              </div>
-              <button id="btnOffsetRight" class="btn ghost sm" title="Next track">▶</button>
-            </div>
+            <!-- Offset Controls (hidden for now) -->
+            <div style="display:none"></div>
             
             <div class="trackgrid" id="tracks" style="overflow-y:auto;max-height:320px;"></div>
             <div class="divider"></div>
@@ -670,42 +658,24 @@ function updateOffsetUI() {
 function buildTrackGrid() {
   const host = $('#tracks');
   host.innerHTML = '';
-  
-  // Always show manual track entry fields, even if no device is connected
-
-  // Calculate total tracks based on connected devices (up to 4 devices = 32 tracks)
-  const numDevices = Math.max(1, connectedDevices.size);
-  const totalTracks = Math.min(numDevices * 8, 32);
-  
-  // Add device separators
-  for (let deviceIdx = 0; deviceIdx < numDevices; deviceIdx++) {
-    // Add device header (always show, even for single device)
-    const header = document.createElement('div');
-    header.style.cssText = 'padding:8px 12px;background:#f3f4f6;border-radius:6px;margin:12px 0 8px 0;font-weight:600;font-size:12px;color:#374151;grid-column:1/-1';
-    header.textContent = `🎛️ TDS-8 Device ${deviceIdx + 1} (Tracks ${deviceIdx * 8 + 1}-${(deviceIdx + 1) * 8})`;
-    host.appendChild(header);
-    
-    // Add 8 tracks for this device
-    for (let localIdx = 0; localIdx < 8; localIdx++) {
-      const globalIdx = deviceIdx * 8 + localIdx;
-      const row = document.createElement('div');
-      row.className = 'trackrow';
-      
-      const label = document.createElement('label');
-      label.textContent = `Track ${globalIdx + 1}`;
-      
-      const input = document.createElement('input');
-      input.className = 'input';
-      input.id = 'tname' + globalIdx;
-      input.name = `track-${globalIdx}`;
-      input.value = '';
-      input.placeholder = `${globalIdx + 1}`;
-      input.oninput = () => saveLocalTrackNames();
-      
-      row.appendChild(label);
-      row.appendChild(input);
-      host.appendChild(row);
-    }
+  // Show 8 fields per connected device, default to 8 if none connected
+  let numDevices = connectedDevices && connectedDevices.size ? connectedDevices.size : 1;
+  let totalTracks = Math.min(numDevices * 8, 32);
+  for (let globalIdx = 0; globalIdx < totalTracks; globalIdx++) {
+    const row = document.createElement('div');
+    row.className = 'trackrow';
+    const label = document.createElement('label');
+    label.textContent = `Track ${globalIdx + 1}`;
+    const input = document.createElement('input');
+    input.className = 'input';
+    input.id = 'tname' + globalIdx;
+    input.name = `track-${globalIdx}`;
+    input.value = '';
+    input.placeholder = `${globalIdx + 1}`;
+    input.oninput = () => saveLocalTrackNames();
+    row.appendChild(label);
+    row.appendChild(input);
+    host.appendChild(row);
   }
 }
 
@@ -751,31 +721,7 @@ function loadLocalTrackNames() {
   } catch { return false; }
 }
 
-$('#btnReadTracks').onclick = async () => {
-  log('📖 Reading stored track names...', 'info');
-  try {
-    const res = await fetch('/api/tracknames');
-    const data = await res.json();
-    if (data.ok && data.names) {
-      for (let i = 0; i < 8 && i < data.names.length; i++) {
-        const inputElement = document.getElementById('tname' + i);
-        if (inputElement) {
-          inputElement.value = data.names[i] || '';
-        }
-      }
-      log(`✓ Loaded ${data.names.length} track names from bridge`, 'out');
-      // Auto-send track names to devices after loading
-      $('#btnSendAll').click();
-    } else {
-      log('✗ Failed to read track names', 'err');
-    }
-  } catch (err) {
-    log(`✗ Error: ${err.message}`, 'err');
-  }
-};
-
-
-$('#btnResetTracks').onclick = () => {
+function resetTracks() {
   const numDevices = Math.max(1, connectedDevices.size);
   const totalTracks = Math.min(numDevices * 8, 32);
   
@@ -793,29 +739,16 @@ $('#btnResetTracks').onclick = () => {
   log(`✓ Cleared all track names`, 'info');
 };
 
-// Offset controls
-$('#btnOffsetLeft').onclick = () => {
-  currentOffset = Math.max(0, currentOffset - 1);
-  updateOffsetUI();
-};
-$('#btnOffsetRight').onclick = () => {
-  currentOffset = currentOffset + 1;
-  updateOffsetUI();
-};
+// All button handlers moved to DOMContentLoaded
 
-// Refresh button - sends OSC to M4L to trigger refresh
-$('#btnRefresh').onclick = async () => {
-  // Check if TDS-8 device is connected
+async function refreshFromAbleton() {
   if (!currentDevice) {
     log('✗ Please connect to TDS-8 device first', 'err');
     log('Click "Connect" button on a device in the TDS-8 Devices section above', 'info');
     return;
   }
-  
   log(`🔄 Requesting track refresh from Ableton...`, 'info');
-  
   try {
-    // Send OSC message to M4L to trigger refresh
     const res = await fetch('/api/osc-send', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -824,7 +757,6 @@ $('#btnRefresh').onclick = async () => {
         args: []
       })
     });
-    
     if (res.ok) {
       log(`✓ Sent OSC command: /reannounce`, 'out');
     } else {
@@ -833,14 +765,12 @@ $('#btnRefresh').onclick = async () => {
   } catch (err) {
     log(`✗ Error: ${err.message}`, 'err');
   }
-  // After a short delay, pull stored names from bridge to reflect any M4L updates
   setTimeout(async () => {
     await loadStoredTrackNames();
   }, 400);
-};
+}
 
-// Test OSC button - manually test OSC connection
-$('#btnTestOSC').onclick = async () => {
+async function testOSC() {
   log(`🧪 Testing OSC connection to M4L...`, 'info');
   
   try {
@@ -890,8 +820,7 @@ async function sendTrackNamesForDevice(deviceId) {
   }
 }
 
-$('#btnSendAll').onclick = async () => {
-  // Only send the names currently in the manual fields
+async function sendAllTracks() {
   const trackToDevice = new Map();
   connectedDevices.forEach((deviceInfo, path) => {
     const deviceId = deviceInfo.deviceId;
@@ -919,15 +848,9 @@ $('#btnSendAll').onclick = async () => {
   }
   saveLocalTrackNames();
   log(`✓ Updated ${count} track names to connected devices`, 'out');
-};
-// Change label for 'Clear All Tracks' to 'Reset Track Names'
-document.getElementById('btnResetTracks').textContent = 'Reset Track Names';
+}
 
 // ----- Modals -----
-
-$('#btnCloseWifi').onclick = () => $('#modalWifi').style.display = 'none';
-$('#btnCloseFirmware').onclick = () => $('#modalFirmware').style.display = 'none';
-$('#btnFirmwareTop').onclick = () => $('#modalFirmware').style.display = 'block';
 
 // Shared WiFi scan function
 async function scanWiFiNetworks() {
@@ -958,29 +881,7 @@ async function scanWiFiNetworks() {
   }
 }
 
-$('#btnScanNetworks').onclick = scanWiFiNetworks;
-$('#btnWifiScanQuick').onclick = scanWiFiNetworks;
-
-$('#btnAddNetwork').onclick = () => {
-  $('#modalAddNetwork').style.display = 'block';
-};
-$('#btnCancelAdd').onclick = () => $('#modalAddNetwork').style.display = 'none';
-
-
-// Top bar Firmware button opens modal; if device connected, auto-run check
-const btnFwTop = $('#btnFirmwareTop');
-if (btnFwTop) {
-  btnFwTop.onclick = () => {
-    $('#modalFirmware').style.display = 'block';
-    // If connected, auto-check for updates
-    if (currentDevice) {
-      const btnCheck = $('#btnCheck');
-      if (btnCheck) btnCheck.click();
-    }
-  };
-}
-
-$('#btnCloseFirmware').onclick = () => $('#modalFirmware').style.display = 'none';
+// All WiFi and Firmware button handlers moved to DOMContentLoaded
 
 // ----- Wi-Fi -----
 let scannedNetworks = [];
@@ -1113,7 +1014,7 @@ async function connectToNetwork(ssid, password) {
   $('#modalWifi').style.display = 'none';
 }
 
-$('#btnSaveNetwork').onclick = async () => {
+async function saveNetwork() {
   const ssid = $('#ssidInput').value.trim();
   const password = $('#pwd').value;
   
@@ -1149,7 +1050,7 @@ $('#btnSaveNetwork').onclick = async () => {
 // ----- Firmware -----
 const MANIFEST_URL = 'https://raw.githubusercontent.com/m1llipede/tds8/main/manifest.json';
 
-$('#btnCheck').onclick = async () => {
+async function checkFirmware() {
   if (!currentDevice) {
     const status = $('#firmwareStatus');
     status.innerHTML = `
@@ -1215,7 +1116,7 @@ $('#btnCheck').onclick = async () => {
   }
 };
 
-$('#btnOta').onclick = async () => {
+async function startOTA() {
   if (!confirm('Start firmware update? Device will switch to Wi-Fi mode and update.')) return;
   
   const status = $('#firmwareStatus');
@@ -1253,17 +1154,10 @@ async function sendCmd(cmd) {
   else log(`✗ Send error: ${j.error}`, 'err');
 }
 
-$('#btnSend').onclick = () => {
+function sendCommand() {
   sendCmd($('#cmd').value);
   $('#cmd').value = '';
-};
-
-$('#cmd').onkeypress = (e) => {
-  if (e.key === 'Enter') {
-    sendCmd($('#cmd').value);
-    $('#cmd').value = '';
-  }
-};
+}
 
 
 // ----- WebSocket -----
@@ -1517,207 +1411,200 @@ async function checkDeviceStatus() {
 }
 
 // ----- Init -----
-setTimeout(() => {
-  document.getElementById('splash').style.display = 'none';
-  document.getElementById('mainApp').style.display = '';
+window.addEventListener('DOMContentLoaded', () => {
+  log('TDS-8 Control ready', 'info');
+  
   buildTrackGrid();
-  updateOffsetUI();
-  // Do NOT load track names yet
   scanDevices();
   setInterval(scanDevices, 5000);
   checkDeviceStatus();
-}, 3000);
-// Also auto-scan devices on DOMContentLoaded
-window.addEventListener('DOMContentLoaded', () => {
-  scanDevices();
-});
-// Load track numbers only at start
-function buildTrackGrid(showNames = false) {
-  const offset = getCurrentOffset();
-  const grid = document.getElementById('tracks');
-  if (!grid) return;
-  grid.innerHTML = '';
-  for (let i = 0; i < 8; i++) {
-    const row = document.createElement('div');
-    row.className = 'trackrow';
-    const label = document.createElement('label');
-    label.textContent = `Track ${offset + i + 1}`;
-    row.appendChild(label);
-    const input = document.createElement('input');
-    input.className = 'input';
-    input.type = 'text';
-    input.id = 'tname' + i;
-    input.value = showNames && window.trackNames && window.trackNames[i] ? window.trackNames[i] : '';
-    input.placeholder = '';
-    row.appendChild(input);
-    grid.appendChild(row);
+
+  // Attach all button event listeners safely (inside DOMContentLoaded)
+  const refreshBtn = document.getElementById('btnRefreshDevices');
+  if (refreshBtn) {
+    refreshBtn.onclick = async () => {
+      log('🔄 Manually refreshing device list...', 'info');
+      await scanDevices();
+      log('✓ Device list refreshed', 'out');
+    };
   }
-}
-// Auto-scan WiFi networks on startup
-setTimeout(async () => {
-  try {
-    const res = await fetch('/api/wifi-scan');
-    const data = await res.json();
-    if (data.ok && data.ssids) {
-      scannedNetworks = data.ssids;
-      const wifiSelect = $('#wifiNetworkSelect');
-      if (wifiSelect) {
-        wifiSelect.innerHTML = '<option value="">Select WiFi network...</option>';
-        data.ssids.forEach(ssid => {
-          const option = document.createElement('option');
-          option.value = ssid;
-          option.textContent = ssid;
-          wifiSelect.appendChild(option);
-        });
+
+  const btnRefresh = document.getElementById('btnRefresh');
+  if (btnRefresh) btnRefresh.onclick = refreshFromAbleton;
+
+  const btnTestOSC = document.getElementById('btnTestOSC');
+  if (btnTestOSC) btnTestOSC.onclick = testOSC;
+
+  const btnSendAll = document.getElementById('btnSendAll');
+  if (btnSendAll) btnSendAll.onclick = sendAllTracks;
+
+  const btnResetTracks = document.getElementById('btnResetTracks');
+  if (btnResetTracks) {
+    btnResetTracks.textContent = 'Reset Track Names';
+    btnResetTracks.onclick = resetTracks;
+  }
+
+  // WiFi buttons
+  const btnScanNetworks = document.getElementById('btnScanNetworks');
+  if (btnScanNetworks) btnScanNetworks.onclick = scanWiFiNetworks;
+
+  const btnWifiScanQuick = document.getElementById('btnWifiScanQuick');
+  if (btnWifiScanQuick) btnWifiScanQuick.onclick = scanWiFiNetworks;
+
+  const btnAddNetwork = document.getElementById('btnAddNetwork');
+  if (btnAddNetwork) btnAddNetwork.onclick = () => $('#modalAddNetwork').style.display = 'block';
+
+  const btnCancelAdd = document.getElementById('btnCancelAdd');
+  if (btnCancelAdd) btnCancelAdd.onclick = () => $('#modalAddNetwork').style.display = 'none';
+
+  const btnSaveNetwork = document.getElementById('btnSaveNetwork');
+  if (btnSaveNetwork) btnSaveNetwork.onclick = saveNetwork;
+
+  const btnCloseWifi = document.getElementById('btnCloseWifi');
+  if (btnCloseWifi) btnCloseWifi.onclick = () => $('#modalWifi').style.display = 'none';
+
+  // Firmware buttons
+  const btnFirmwareTop = document.getElementById('btnFirmwareTop');
+  if (btnFirmwareTop) {
+    btnFirmwareTop.onclick = () => {
+      $('#modalFirmware').style.display = 'block';
+      if (currentDevice) {
+        const btnCheck = $('#btnCheck');
+        if (btnCheck) btnCheck.click();
       }
-      console.log(`✓ Auto-scan found ${data.ssids.length} WiFi networks`);
-    } else {
-      console.log('WiFi scan returned no networks:', data);
-    }
-  } catch (err) {
-    console.log('WiFi scan on startup failed:', err);
+    };
   }
-}, 2000);
-log('TDS-8 Control ready', 'info');
 
-// Refresh Devices button
-const refreshBtn = document.getElementById('btnRefreshDevices');
-if (refreshBtn) {
-  refreshBtn.onclick = async () => {
-    log('🔄 Manually refreshing device list...', 'info');
-    await scanDevices();
-    log('✓ Device list refreshed', 'out');
-  };
-}
+  const btnCloseFirmware = document.getElementById('btnCloseFirmware');
+  if (btnCloseFirmware) btnCloseFirmware.onclick = () => $('#modalFirmware').style.display = 'none';
 
-// Multi-device connection button
-const btnConnectMulti = document.getElementById('btnConnectMulti');
-if (btnConnectMulti) {
-  btnConnectMulti.onclick = async () => {
-    try {
-      log('🎛️ Scanning for TDS-8 devices...', 'info');
-      
-      // Get all TDS-8 devices
-      const res = await fetch('/api/ports');
-      if (!res.ok) throw new Error('Failed to scan ports');
-      const ports = await res.json();
-      
-      if (ports.length === 0) {
-        log('✗ No TDS-8 devices found. Please connect devices via USB.', 'err');
+  const btnCheck = document.getElementById('btnCheck');
+  if (btnCheck) btnCheck.onclick = checkFirmware;
+
+  const btnOta = document.getElementById('btnOta');
+  if (btnOta) btnOta.onclick = startOTA;
+
+  // Command input
+  const btnSend = document.getElementById('btnSend');
+  if (btnSend) btnSend.onclick = sendCommand;
+
+  const cmdInput = document.getElementById('cmd');
+  if (cmdInput) {
+    cmdInput.onkeypress = (e) => {
+      if (e.key === 'Enter') sendCommand();
+    };
+  }
+
+  const btnReadTracks = document.getElementById('btnReadTracks');
+  if (btnReadTracks) {
+    btnReadTracks.onclick = async () => {
+      log('📖 Reading stored track names...', 'info');
+      try {
+        const res = await fetch('/api/tracknames');
+        const data = await res.json();
+        if (data.ok && data.names) {
+          for (let i = 0; i < 8 && i < data.names.length; i++) {
+            const inputElement = document.getElementById('tname' + i);
+            if (inputElement) {
+              inputElement.value = data.names[i] || '';
+            }
+          }
+          log(`✓ Loaded ${data.names.length} track names from bridge`, 'out');
+        } else {
+          log('✗ Failed to read track names', 'err');
+        }
+      } catch (err) {
+        log(`✗ Error: ${err.message}`, 'err');
+      }
+    };
+  }
+
+  const wiredConnectBtn = document.getElementById('btnWiredConnect');
+  if (wiredConnectBtn) {
+    wiredConnectBtn.onclick = async () => {
+      if (currentDevice) {
+        await fetch('/api/disconnect', { method: 'POST' });
+        disconnect(currentDevice);
         return;
       }
-      
-      log(`✓ Found ${ports.length} TDS-8 device(s)`, 'out');
-      log('🔗 Connecting all devices...', 'info');
-      
-      // Connect all devices
-      const portPaths = ports.map(p => p.path);
-      const connectRes = await fetch('/api/connect-multi', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ports: portPaths })
-      });
-      
-      if (!connectRes.ok) throw new Error('Failed to connect devices');
-      const result = await connectRes.json();
-      
-      // Show results and update UI
-      result.devices.forEach(d => {
-        if (d.ok) {
-          log(`✓ Device ${d.deviceId} connected: ${d.path} (Tracks ${d.deviceId * 8 + 1}-${(d.deviceId + 1) * 8})`, 'out');
-          // Mark device as connected in UI
-          connectedDevices.set(d.path, { deviceId: d.deviceId, tracks: `${d.deviceId * 8 + 1}-${(d.deviceId + 1) * 8}` });
-        } else {
-          log(`✗ Failed to connect ${d.path}: ${d.error}`, 'err');
-        }
-      });
-      
-      // Refresh device list to show connected status
-      await scanDevices();
-      
-      log('✅ Multi-device setup complete!', 'out');
-      log('💡 Device IDs have been auto-assigned. Tracks will be routed automatically.', 'info');
-      
-    } catch (err) {
-      log(`✗ Multi-device connection failed: ${err.message}`, 'err');
-    }
-  };
-}
-
-// Wired connection button (top bar) - toggle connect/disconnect
-const wiredConnectBtn = document.getElementById('btnWiredConnect');
-if (wiredConnectBtn) {
-  wiredConnectBtn.onclick = async () => {
-    // Check if already connected
-    if (currentDevice) {
-      // Disconnect
-      await fetch('/api/disconnect', { method: 'POST' });
-      disconnect(currentDevice);
-      return;
-    }
-    
-    // Connect
-    const comSelect = document.getElementById('comPortSelect');
-    const path = comSelect ? comSelect.value : '';
-    if (!path) { 
-      log('✗ Select a COM port from the dropdown', 'err'); 
-      return; 
-    }
-    try {
-      const portName = path.split(/[/\\]/).pop();
-      await connect(path, portName, null);
-      // Update button and status to show connected state
-      wiredConnectBtn.textContent = 'Disconnect';
-      wiredConnectBtn.className = 'btn ghost sm';
-      comSelect.style.backgroundColor = '#d1fae5';
-      const wiredStatus = $('#wiredStatus');
-      if (wiredStatus) {
-        wiredStatus.textContent = 'Connected';
-        wiredStatus.style.background = '#10b981';
-        wiredStatus.style.color = '#fff';
+      const comSelect = document.getElementById('comPortSelect');
+      const path = comSelect ? comSelect.value : '';
+      if (!path) { 
+        log('✗ Select a COM port from the dropdown', 'err'); 
+        return; 
       }
-    } catch (e) {
-      log(`✗ Connect failed: ${e.message}`, 'err');
-    }
-  };
-}
+      try {
+        const portName = path.split(/[/\\]/).pop();
+        await connect(path, portName, null);
+        wiredConnectBtn.textContent = 'Disconnect';
+        wiredConnectBtn.className = 'btn ghost sm';
+        comSelect.style.backgroundColor = '#d1fae5';
+        const wiredStatus = $('#wiredStatus');
+        if (wiredStatus) {
+          wiredStatus.textContent = 'Connected';
+          wiredStatus.style.background = '#10b981';
+          wiredStatus.style.color = '#fff';
+        }
+      } catch (e) {
+        log(`✗ Connect failed: ${e.message}`, 'err');
+      }
+    };
+  }
 
-// WiFi connection button (top bar)
-const wifiConnectBtn = document.getElementById('btnWifiConnect');
-if (wifiConnectBtn) {
-  wifiConnectBtn.onclick = async () => {
-    if (!currentDevice) {
-      log('✗ Please connect to TDS-8 device first (wired connection required to configure WiFi)', 'err');
-      return;
+  const wifiConnectBtn = document.getElementById('btnWifiConnect');
+  if (wifiConnectBtn) {
+    wifiConnectBtn.onclick = async () => {
+      if (!currentDevice) {
+        log('✗ Please connect to TDS-8 device first (wired connection required to configure WiFi)', 'err');
+        return;
+      }
+      const wifiSelect = document.getElementById('wifiNetworkSelect');
+      const ssid = wifiSelect ? wifiSelect.value : '';
+      if (!ssid) {
+        log('✗ Select a WiFi network from the dropdown', 'err');
+        return;
+      }
+      const savedNetwork = savedWifiNetworks.find(n => n.ssid === ssid);
+      let password;
+      if (savedNetwork) {
+        password = savedNetwork.password;
+        log(`📡 Using saved password for "${ssid}"`, 'info');
+      } else {
+        password = prompt(`Enter password for WiFi network "${ssid}":\n\n(Leave blank if no password)`);
+        if (password === null) return;
+      }
+      log(`📡 Configuring TDS-8 to connect to "${ssid}"...`, 'info');
+      log('⚠️ Device will disconnect from USB and switch to WiFi mode', 'info');
+      await connectToNetwork(ssid, password);
+    };
+  }
+
+  // Auto-scan WiFi networks after a short delay
+  setTimeout(async () => {
+    try {
+      const res = await fetch('/api/wifi-scan');
+      const data = await res.json();
+      if (data.ok && data.ssids) {
+        scannedNetworks = data.ssids;
+        const wifiSelect = $('#wifiNetworkSelect');
+        if (wifiSelect) {
+          wifiSelect.innerHTML = '<option value="">Select WiFi network...</option>';
+          data.ssids.forEach(ssid => {
+            const option = document.createElement('option');
+            option.value = ssid;
+            option.textContent = ssid;
+            wifiSelect.appendChild(option);
+          });
+        }
+        console.log(`✓ Auto-scan found ${data.ssids.length} WiFi networks`);
+      } else {
+        console.log('WiFi scan returned no networks:', data);
+      }
+    } catch (err) {
+      console.log('WiFi scan on startup failed:', err);
     }
-    
-    const wifiSelect = document.getElementById('wifiNetworkSelect');
-    const ssid = wifiSelect ? wifiSelect.value : '';
-    if (!ssid) {
-      log('✗ Select a WiFi network from the dropdown', 'err');
-      return;
-    }
-    
-    // Check if network is already saved
-    const savedNetwork = savedWifiNetworks.find(n => n.ssid === ssid);
-    let password;
-    
-    if (savedNetwork) {
-      // Use saved password
-      password = savedNetwork.password;
-      log(`📡 Using saved password for "${ssid}"`, 'info');
-    } else {
-      // Prompt for password
-      password = prompt(`Enter password for WiFi network "${ssid}":\n\n(Leave blank if no password)`);
-      if (password === null) return; // User cancelled
-    }
-    
-    log(`📡 Configuring TDS-8 to connect to "${ssid}"...`, 'info');
-    log('⚠️ Device will disconnect from USB and switch to WiFi mode', 'info');
-    
-    await connectToNetwork(ssid, password);
-  };
-}
+  }, 2000);
+});
 </script>
 </body>
 </html>
