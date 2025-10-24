@@ -43,8 +43,8 @@
 #include <WiFiClientSecure.h>
 
 // =======================  Firmware  =======================
-#define FW_VERSION "0.35"   // ← bump this when you publish a new firmware
-#define FW_BUILD "2025.10.20-wifi-stability"  // ← build identifier (date + feature)
+#define FW_VERSION "0.351"   // ← bump this when you publish a new firmware
+#define FW_BUILD "2025.10.21-multi-device"  // ← build identifier (date + feature)
 #define GITHUB_MANIFEST_URL "https://raw.githubusercontent.com/m1llipede/tds8/main/manifest.json"
 
 // =======================  OLED / I2C  ======================
@@ -66,6 +66,23 @@ AppState currentState = STATE_STARTUP_SPLASH;
 unsigned long stateTransitionTime = 0;
 
 // =======================  Graphics / Bitmaps  ==============
+// Show TDS-8 and Playoptix logo splash on all screens for 3 seconds
+void showLogosSplash() {
+  for (uint8_t i = 0; i < 8; ++i) {
+    tcaSelect(i);
+    display.clearDisplay();
+    display.setTextSize(2);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(10, 8);
+    display.println("TDS-8");
+    display.setTextSize(1);
+    display.setCursor(10, 40);
+    display.println("by Playoptix");
+    display.display();
+  }
+  delay(3000);
+}
+
 // PlayOptix logo - 128x64px (full display)
 const unsigned char playoptix_logo [] PROGMEM = {
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -350,9 +367,11 @@ void setup() {
     WiFi.mode(WIFI_OFF);  // Explicitly turn off WiFi
     
     // In wired mode, skip instructions and go straight to running
-    // Keep splash screen showing (logo on OLED 8)
     currentState = STATE_RUNNING;
-    Serial.println("🚀 Wired mode active - logo displayed");
+    
+    // Clear splash and show blank track displays
+    refreshAll();
+    Serial.println("🚀 Wired mode active - ready for serial commands");
     
     // No HTTP server, no OSC, no WiFi - just serial
     // Ready for serial commands
@@ -464,16 +483,16 @@ void loop() {
   switch (currentState) {
     case STATE_STARTUP_SPLASH:
       if (millis() >= stateTransitionTime) {
-        Serial.println("⏱️ Splash screen complete. Showing instructions for 5s...");
-        showQuickStartInstructions();
-        stateTransitionTime = millis() + 5000; // Hold instructions for 5 seconds
+        Serial.println("⏱️ Splash screen complete. Showing logos for 3s...");
+        showLogosSplash();
+        stateTransitionTime = millis() + 3000; // Hold logos for 3 seconds
         currentState = STATE_INSTRUCTIONS;
       }
       return; // Do nothing else during splash
 
     case STATE_INSTRUCTIONS:
       if (millis() >= stateTransitionTime) {
-        Serial.println("✅ Instructions complete. Switching to track displays.");
+        Serial.println("✅ Logo splash complete. Switching to track displays.");
         refreshAll(); // Show blank track names now
         currentState = STATE_RUNNING;
       }
@@ -718,8 +737,8 @@ void drawTrackName(uint8_t screen, const String& name) {
 }
 
 void refreshAll() {
-  for (uint8_t i = 0; i < numScreens; i++) drawTrackName(i, trackNames[i]);
-}
+  for (uint8_t i = 0; i < numScreens; i++) drawTrackName(i, "");
+} // Show blank center, only bottom track number, until names are set
 
 void drawCentered(const String& s, uint8_t textSize, int y) {
   display.setTextSize(textSize);
@@ -1629,19 +1648,22 @@ void handleSerialLine(const String& line) {
       return;
     }
     
-    if (newID != deviceID) {
-      deviceID = newID;
-      saveDeviceID();
-      // Update actual track numbers based on new device ID
-      int offset = deviceID * 8;
-      for (int i = 0; i < numScreens; i++) {
-        actualTrackNumbers[i] = offset + i;
-      }
-      refreshAll();
-      Serial.printf("OK: DEVICE_ID set to %d (tracks %d-%d)\n", deviceID, offset + 1, offset + 8);
-    } else {
-      Serial.printf("OK: DEVICE_ID already %d\n", deviceID);
+    // Always update track numbers and refresh display, even if ID hasn't changed
+    deviceID = newID;
+    saveDeviceID();
+    
+    // Update actual track numbers based on device ID
+    int offset = deviceID * 8;
+    for (int i = 0; i < numScreens; i++) {
+      actualTrackNumbers[i] = offset + i;
     }
+    
+    // Force device to running state to synchronize with other devices
+    // This ensures all devices show the same screen (track displays) in multi-device setups
+    currentState = STATE_RUNNING;
+    
+    refreshAll();
+    Serial.printf("OK: DEVICE_ID set to %d (tracks %d-%d)\n", deviceID, offset + 1, offset + 8);
     return;
   }
 

@@ -13,7 +13,7 @@ const { SerialPortStream } = require('@serialport/stream');
 const { autoDetect } = require('@serialport/bindings-cpp');
 
 const PORT = process.env.PORT || 8088;
-const OSC_LISTEN_PORT = parseInt(process.env.OSC_LISTEN_PORT || '8000', 10);
+const OSC_LISTEN_PORT = parseInt(process.env.OSC_LISTEN_PORT || '8002', 10);  // Changed from 8000 to avoid conflicts
 const BAUD = parseInt(process.env.BAUD || '115200', 10);
 
 // Optional defaults (you can set these later)
@@ -25,7 +25,12 @@ const Bindings = autoDetect();
 // Multi-device support: Store up to 4 TDS-8 devices
 const MAX_DEVICES = 4;
 let devices = []; // Array of { id, serial, path, buffer, version, deviceID }
-let deviceVersion = null; // Legacy - for backward compatibility
+
+// Legacy single device variables (for backward compatibility)
+let serial = null;
+let serialPath = null;
+let serialBuf = '';
+let deviceVersion = null;
 
 const app = express();
 const server = http.createServer(app);
@@ -60,34 +65,51 @@ function initOSC() {
     return udpPort;
 }
 
-// Track device IP for WiFi mode
+// Track device IP for WiFi mode (for display/status only)
 let deviceIP = "127.0.0.1"; // Default to localhost for wired mode
 
-// Send OSC message to Ableton
+// M4L always runs on localhost
+const M4L_IP = "127.0.0.1";
+const M4L_PORT = 8001;  // Changed from 9000 to avoid conflicts
+
+// Ableton connection tracking (module scope for API access)
+let abletonConnected = false;
+let lastHiTime = 0;
+let lastHelloResponse = 0;
+
+// Send OSC message to Ableton (M4L)
 function sendOSC(address, args = []) {
     const port = initOSC();
-    if (port) {
-        try {
-            port.send({
-                address: address,
-                args: args
-            }, deviceIP, 9000); // Use tracked device IP (localhost or WiFi IP)
-            const argsStr = args.length > 0 ? ' [' + args.map(a => a.value || a).join(', ') + ']' : '';
-            console.log(`Sent to Ableton (${deviceIP}): ${address}${argsStr}`);
-            
-            // Broadcast to browser UI
-            wsBroadcast({ 
-                type: 'osc-sent', 
-                address: address, 
-                args: args,
-                argsStr: argsStr
-            });
-        } catch (err) {
-            console.error(`OSC send error (${address}):`, err.message);
-        }
+    if (!port) {
+        console.error('❌ OSC port not initialized - cannot send', address);
+        return;
+    }
+    
+    if (!port.socket || !port.socket._handle) {
+        console.error('❌ OSC socket not ready - cannot send', address);
+        return;
+    }
+    
+    try {
+        // Send to M4L (always localhost)
+        port.send({
+            address: address,
+            args: args
+        }, M4L_IP, M4L_PORT);
+        const argsStr = args.length > 0 ? ' [' + args.map(a => a.value || a).join(', ') + ']' : '';
+        console.log(`📤 OSC → M4L (${M4L_IP}:${M4L_PORT}): ${address}${argsStr}`);
+        
+        // Broadcast to browser UI
+        wsBroadcast({ 
+            type: 'osc-sent', 
+            address: address, 
+            args: args,
+            argsStr: argsStr
+        });
+    } catch (err) {
+        console.error(`❌ OSC send error (${address}):`, err.message, err.stack);
     }
 }
-
 
 // OSC Listener on port 8000 for receiving commands from M4L
 let oscListener = null;
@@ -102,29 +124,29 @@ function initOSCListener() {
             });
             
             // Simple handshake: send /hello, expect /hi back
-            let abletonConnected = false;
-            let lastHelloResponse = 0;
+            // (variables are in module scope)
             
             // Function to check connection and send hello
             const checkConnection = () => {
                 // Send /hello
-                console.log('>>> Handshake check...');
+                const now = Date.now();
+                const timeSinceLastHi = lastHiTime ? Math.floor((now - lastHiTime) / 1000) : null;
+                console.log(`>>> Handshake check... (last /hi: ${timeSinceLastHi ? timeSinceLastHi + 's ago' : 'never'})`);
                 sendOSC('/hello', []);
                 
                 // Check if we got /hi in last 30 seconds
-                const now = Date.now();
-                const wasConnected = abletonConnected;
-                abletonConnected = (now - lastHelloResponse) < 30000;
-                
-                if (wasConnected !== abletonConnected) {
-                    console.log(`${abletonConnected ? '✓ Ableton CONNECTED' : '✗ Ableton DISCONNECTED'}`);
-                    try {
-                        if (serial && serial.isOpen) {
-                            const cmd = abletonConnected ? '/ableton_on\n' : '/ableton_off\n';
-                            send(cmd);
-                        }
-                    } catch (err) {
-                        console.error('Error sending Ableton status:', err);
+                if (lastHiTime && (now - lastHiTime < 30000)) {
+                    if (!abletonConnected) {
+                        abletonConnected = true;
+                        console.log('✓ Ableton connected (received /hi)');
+                        wsBroadcast({ type: 'ableton-connected' });
+                        sendOSC('/ableton_on', []);
+                    }
+                } else {
+                    if (abletonConnected) {
+                        abletonConnected = false;
+                        console.log('⚠️ Ableton disconnected (no /hi in 30s)');
+                        wsBroadcast({ type: 'ableton-disconnected' });
                     }
                 }
             };
@@ -138,6 +160,11 @@ function initOSCListener() {
             // Then send /hello every 10 seconds
             setInterval(checkConnection, 10000);
             
+            // Log raw packets for debugging
+            oscListener.on("raw", (data, info) => {
+                console.log(`📦 RAW OSC packet received from ${info.address}:${info.port}, ${data.length} bytes`);
+            });
+            
             oscListener.on("message", (oscMsg, timeTag, info) => {
                 const fromIP = info.address || 'unknown';
                 const fromPort = info.port || 'unknown';
@@ -146,7 +173,7 @@ function initOSCListener() {
                 const argsStr = oscMsg.args && oscMsg.args.length > 0 
                     ? oscMsg.args.map(a => a.value).join(', ') 
                     : '';
-                console.log(`Received: ${oscMsg.address}${argsStr ? ' [' + argsStr + ']' : ''}`);
+                console.log(`📨 Received OSC: ${oscMsg.address}${argsStr ? ' [' + argsStr + ']' : ''} from ${fromIP}:${fromPort}`);
                 
                 wsBroadcast({ type: 'osc-received', from: `${fromIP}:${fromPort}`, address: oscMsg.address, args: oscMsg.args });
                 
@@ -177,9 +204,12 @@ function initOSCListener() {
                 
                 // Handle /hi response to our /hello
                 if (oscMsg.address === "/hi") {
+                    lastHiTime = Date.now();
                     lastHelloResponse = Date.now();
                     const wasConnected = abletonConnected;
                     abletonConnected = true;
+                    
+                    console.log(`✓ Received /hi from M4L (port ${OSC_LISTEN_PORT})`);
                     
                     // Send /ableton_on EVERY time we get /hi (triggers heartbeat flash)
                     try {
@@ -208,11 +238,26 @@ function initOSCListener() {
                     const actualTrack = oscMsg.args.length >= 3 ? oscMsg.args[2].value : displayIndex;
 
                     const esc = String(nameRaw).replace(/"/g, '\\"');
-                    const cmd = `/trackname ${displayIndex} "${esc}" ${actualTrack}\n`;
-                    send(cmd);
+                    
+                    // Multi-device: Route to correct device based on track number
+                    if (devices.length > 0) {
+                        // Calculate which device this track belongs to
+                        const deviceId = Math.floor(actualTrack / 8);
+                        const localIndex = actualTrack % 8;
+                        
+                        if (deviceId < devices.length) {
+                            const cmd = `/trackname ${localIndex} "${esc}" ${actualTrack}\n`;
+                            sendToDevice(deviceId, cmd);
+                            console.log(`📍 Routed track ${actualTrack} to Device ${deviceId}, local index ${localIndex}`);
+                        }
+                    } else {
+                        // Single device mode (legacy)
+                        const cmd = `/trackname ${displayIndex} "${esc}" ${actualTrack}\n`;
+                        send(cmd);
+                    }
 
                     // Store the UNESCAPED name for UI/API (not the escaped version)
-                    if (displayIndex >= 0 && displayIndex < 8) {
+                    if (displayIndex >= 0 && displayIndex < 32) {
                         currentTrackNames[displayIndex] = String(nameRaw);
                     }
                 }
@@ -312,11 +357,46 @@ function initDeviceListener() {
 
 // Start OSC sender and listener immediately
 console.log('\n========== OSC INITIALIZATION ==========');
-initOSC();        // Initialize OSC sender
-initOSCListener(); // Initialize OSC listener (port 8000 - from M4L)
+console.log('Calling initOSC()...');
+const oscSender = initOSC();        // Initialize OSC sender
+console.log('OSC Sender returned:', oscSender ? 'object' : 'null');
+
+console.log('Calling initOSCListener()...');
+const oscReceiver = initOSCListener(); // Initialize OSC listener (port 8000 - from M4L)
+console.log('OSC Listener returned:', oscReceiver ? 'object' : 'null');
+
+console.log('Calling initDeviceListener()...');
 initDeviceListener(); // Initialize device listener (port 9000 - from TDS-8)
+
+// Wait a moment for ports to open, then verify
+setTimeout(() => {
+  console.log('\n🔍 OSC Status Check:');
+  console.log(`  Sender (port 9001): ${oscSender && oscSender.socket ? '✅ Ready' : '❌ Failed'}`);
+  console.log(`  Listener (port 8000): ${oscReceiver && oscReceiver.socket ? '✅ Ready' : '❌ Failed'}`);
+  
+  if (!oscSender || !oscSender.socket) {
+    console.error('⚠️ OSC Sender failed to initialize - M4L communication will not work!');
+    console.error('   Check if port 9001 is already in use by another application.');
+  }
+  if (!oscReceiver || !oscReceiver.socket) {
+    console.error('⚠️ OSC Listener failed to initialize - Cannot receive from M4L!');
+    console.error('   Check if port 8000 is already in use by another application.');
+  }
+  
+  // Test send
+  console.log('\n🧪 Sending test /hello to M4L...');
+  if (oscSender && oscSender.socket) {
+    try {
+      oscSender.send({ address: '/hello', args: [] }, M4L_IP, M4L_PORT);
+      console.log(`✅ Test message sent successfully to ${M4L_IP}:${M4L_PORT}`);
+    } catch (e) {
+      console.error('❌ Test send failed:', e.message);
+    }
+  }
+}, 1000);
+
 console.log('========================================\n');
-// Function to broadcast IP update to M4L (port 9000)
+// Function to broadcast IP update to M4L
 function broadcastIPUpdate() {
     try {
         const port = initOSC();
@@ -326,8 +406,8 @@ function broadcastIPUpdate() {
             address: "/ipupdate",
             args: [{ type: "s", value: deviceIP }]
         };
-        console.log(`SENT: /ipupdate ${deviceIP} (to M4L)`);
-        port.send(message, "127.0.0.1", 9000);
+        console.log(`SENT: /ipupdate ${deviceIP} (to M4L on port ${M4L_PORT})`);
+        port.send(message, M4L_IP, M4L_PORT);
     } catch (err) {
         console.error("Error:", err.message);
     }
@@ -337,14 +417,14 @@ app.use(express.json({ limit: '10mb' }));
 app.use(morgan('dev'));
 app.use(express.static(path.join(__dirname, 'web')));
 
+// Serve index.html at root
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'web', 'index.html'));
+});
+
 // Redirect old favicon.ico requests to favicon.svg
 app.get('/favicon.ico', (req, res) => {
   res.redirect(301, '/favicon.svg');
-});
-
-// Explicit root route handler as fallback
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'web', 'index.html'));
 });
 
 function wsBroadcast(obj) {
@@ -390,6 +470,57 @@ function send(s) {
   }
   serial.write(s);
   console.log(`SENT: ${s.trim()}`);
+}
+
+// Multi-device: Send to specific device by ID
+function sendToDevice(deviceId, s) {
+  const device = devices.find(d => d.id === deviceId);
+  if (!device || !device.serial || !device.serial.isOpen) {
+    console.error(`❌ Cannot send to device ${deviceId} - Not connected`);
+    throw new Error(`Device ${deviceId} not connected`);
+  }
+  device.serial.write(s);
+  console.log(`SENT to Device ${deviceId}: ${s.trim()}`);
+}
+
+// Multi-device: Send to all connected devices
+function sendToAll(s) {
+  devices.forEach(device => {
+    if (device.serial && device.serial.isOpen) {
+      device.serial.write(s);
+      console.log(`SENT to Device ${device.id}: ${s.trim()}`);
+    }
+  });
+}
+
+// Multi-device: Handle serial data from specific device
+function onSerialDataMulti(device, chunk) {
+  const text = chunk.toString('utf8');
+  device.buffer += text;
+  wsBroadcast({ type: 'serial-data', deviceId: device.id, data: text });
+  let idx;
+  while ((idx = device.buffer.indexOf('\n')) >= 0) {
+    const line = device.buffer.slice(0, idx).trim();
+    device.buffer = device.buffer.slice(idx + 1);
+    if (line) {
+      console.log(`RECV from Device ${device.id}: ${line}`);
+      
+      // Parse DEVICE_ID response
+      const deviceIdMatch = /^DEVICE_ID\s*[:=]\s*(\d+)/i.exec(line);
+      if (deviceIdMatch) {
+        device.deviceID = parseInt(deviceIdMatch[1]);
+        console.log(`✓ Device ${device.id} confirmed DEVICE_ID: ${device.deviceID}`);
+      }
+      
+      // Parse VERSION response
+      const versionMatch = /^VERSION\s*[:=]\s*(.+)/i.exec(line);
+      if (versionMatch) {
+        device.version = versionMatch[1];
+        console.log(`✓ Device ${device.id} version: ${device.version}`);
+        wsBroadcast({ type: 'device-version', version: device.version, path: device.path, deviceId: device.id });
+      }
+    }
+  }
 }
 
 function onSerialData(chunk) {
@@ -566,15 +697,217 @@ app.get('/api/ports/all', async (_req, res) => {
   res.json(decorated);
 });
 
+// Map COM ports to device IDs (persistent across disconnects)
+const portToDeviceId = new Map();
+
 app.post('/api/connect', async (req, res) => {
   try {
     const desired = req.body && req.body.path;
+    const requestedDeviceId = req.body && req.body.deviceId; // Frontend can specify device ID
     if (!desired) throw new Error('Missing path');
-    const p = await openSerial(desired);
-    // Broadcast IP update to M4L
-    setTimeout(() => broadcastIPUpdate(), 500);
-    res.json({ ok: true, path: p, baud: BAUD });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    
+    // Check if device is already connected
+    const existingDevice = devices.find(d => d.path === desired);
+    if (existingDevice) {
+      console.log(`⚠️ Device ${desired} already connected as Device ID ${existingDevice.deviceID}`);
+      return res.json({ ok: true, path: desired, baud: BAUD, deviceId: existingDevice.deviceID, alreadyConnected: true });
+    }
+    
+    // Determine device ID: use requested ID, or check port mapping, or assign next available
+    let deviceId;
+    if (requestedDeviceId !== undefined) {
+      deviceId = requestedDeviceId;
+      portToDeviceId.set(desired, deviceId);
+    } else if (portToDeviceId.has(desired)) {
+      // This port has been used before - restore its ID
+      deviceId = portToDeviceId.get(desired);
+      console.log(`📌 Restoring Device ID ${deviceId} for ${desired} (previously assigned)`);
+    } else {
+      // New port - assign next available ID (0-3)
+      const usedIds = new Set(Array.from(portToDeviceId.values()));
+      for (let i = 0; i < MAX_DEVICES; i++) {
+        if (!usedIds.has(i)) {
+          deviceId = i;
+          break;
+        }
+      }
+      if (deviceId === undefined) deviceId = 0; // Fallback
+      portToDeviceId.set(desired, deviceId);
+      console.log(`🆕 Assigning Device ID ${deviceId} to ${desired} (new port)`);
+    }
+    
+    // For first device, use legacy single-device mode but add to devices array
+    if (devices.length === 0) {
+      const p = await openSerial(desired);
+      
+      // Reset deviceIP to localhost for wired connection
+      deviceIP = '127.0.0.1';
+      
+      // Add first device to devices array for routing
+      const device = {
+        id: deviceId,
+        serial: serial,
+        path: p,
+        buffer: serialBuf,
+        version: deviceVersion,
+        deviceID: deviceId
+      };
+      devices.push(device);
+      
+      console.log(`📊 [DEVICES] Array after connection:`, devices.map(d => `[ID=${d.deviceID}, path=${d.path}]`).join(', '));
+      
+      // Send DEVICE_ID to first device
+      setTimeout(() => {
+        send(`DEVICE_ID ${deviceId}\n`);
+        console.log(`✓ Connected: ${p} → Device ID ${deviceId} (Tracks ${deviceId * 8 + 1}-${(deviceId + 1) * 8})`);
+      }, 500);
+      
+      // Broadcast device status to UI (wired mode)
+      // Force wired mode since we're connecting via serial
+      deviceIP = '127.0.0.1';
+      wsBroadcast({
+        type: 'device-mode',
+        mode: 'wired',
+        ip: '127.0.0.1'
+      });
+      
+      // Broadcast IP update to M4L
+      setTimeout(() => broadcastIPUpdate(), 500);
+      res.json({ ok: true, path: p, baud: BAUD, deviceId });
+    } else {
+      // For additional devices, use multi-device mode
+      const newSerial = new SerialPortStream({ binding: Bindings, path: desired, baudRate: BAUD });
+      
+      const device = {
+        id: deviceId,
+        serial: newSerial,
+        path: desired,
+        buffer: '',
+        version: null,
+        deviceID: deviceId
+      };
+      
+      devices.push(device);
+      
+      console.log(`📊 [DEVICES] Array after connection:`, devices.map(d => `[ID=${d.deviceID}, path=${d.path}]`).join(', '));
+      
+      // Set up data handler for this device
+      newSerial.on('data', (chunk) => onSerialDataMulti(device, chunk));
+      
+      // Send DEVICE_ID command to set track offset
+      setTimeout(() => {
+        sendToDevice(deviceId, `DEVICE_ID ${deviceId}\n`);
+        sendToDevice(deviceId, 'VERSION\n');
+        console.log(`✓ Connected: ${desired} → Device ID ${deviceId} (Tracks ${deviceId * 8 + 1}-${(deviceId + 1) * 8})`);
+      }, 1000);
+      
+      // Broadcast device status to UI (wired mode for additional devices)
+      // Force wired mode since we're connecting via serial
+      deviceIP = '127.0.0.1';
+      wsBroadcast({
+        type: 'device-mode',
+        mode: 'wired',
+        ip: '127.0.0.1'
+      });
+      
+      wsBroadcast({ type: 'serial-open', path: desired, baud: BAUD });
+      res.json({ ok: true, path: desired, baud: BAUD, deviceId });
+    }
+  } catch (e) { 
+    console.error('Connection error:', e);
+    res.status(500).json({ error: e.message }); 
+  }
+});
+
+// Multi-device: Connect multiple TDS-8 devices
+app.post('/api/connect-multi', async (req, res) => {
+  try {
+    const { ports } = req.body; // Array of COM port paths
+    if (!ports || !Array.isArray(ports)) throw new Error('Missing ports array');
+    
+    const results = [];
+    for (let i = 0; i < Math.min(ports.length, MAX_DEVICES); i++) {
+      const portPath = ports[i];
+      try {
+        const deviceId = i; // Auto-assign device ID 0-3
+        const newSerial = new SerialPortStream({ binding: Bindings, path: portPath, baudRate: BAUD });
+        
+        const device = {
+          id: deviceId,
+          serial: newSerial,
+          path: portPath,
+          buffer: '',
+          version: null,
+          deviceID: deviceId
+        };
+        
+        devices.push(device);
+        
+        // Set up data handler for this device
+        newSerial.on('data', (chunk) => onSerialDataMulti(device, chunk));
+        
+        // Send DEVICE_ID command to set the device's ID
+        setTimeout(() => {
+          sendToDevice(deviceId, `DEVICE_ID ${deviceId}\n`);
+          sendToDevice(deviceId, 'VERSION\n');
+        }, 1000);
+        
+        results.push({ ok: true, deviceId, path: portPath });
+        console.log(`✓ Device ${deviceId} connected: ${portPath}`);
+      } catch (err) {
+        results.push({ ok: false, path: portPath, error: err.message });
+      }
+    }
+    
+    wsBroadcast({ type: 'multi-device-connected', devices: results });
+    res.json({ ok: true, devices: results });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Send command to connected device
+app.post('/api/send-command', (req, res) => {
+  try {
+    const { command, deviceId, path } = req.body;
+    if (!command) throw new Error('Missing command');
+    
+    // If deviceId specified, send to that device
+    if (deviceId !== undefined && devices.length > 0) {
+      console.log(`🔍 [ROUTING] Looking for deviceId=${deviceId} in devices:`, devices.map(d => `[ID=${d.deviceID}, id=${d.id}, path=${d.path}]`).join(', '));
+      const device = devices.find(d => d.deviceID === deviceId || d.id === deviceId);
+      if (device) {
+        sendToDevice(device.id, command + '\n');
+        console.log(`📤 [Device ${deviceId}] ${device.path} ← ${command}`);
+      } else {
+        console.error(`❌ Device ${deviceId} not found in devices array:`, devices.map(d => `ID=${d.deviceID}, path=${d.path}`));
+        throw new Error(`Device ${deviceId} not found`);
+      }
+    } 
+    // If path specified, find device by path
+    else if (path && devices.length > 0) {
+      console.log(`🔍 [ROUTING] Looking for path="${path}" in devices:`, devices.map(d => `[ID=${d.deviceID}, path=${d.path}]`).join(', '));
+      const device = devices.find(d => d.path === path);
+      if (device) {
+        sendToDevice(device.id, command + '\n');
+        console.log(`📤 [Device ${device.deviceID}] ${path} ← ${command}`);
+      } else {
+        console.error(`❌ Device at ${path} not found in devices array:`, devices.map(d => `ID=${d.deviceID}, path=${d.path}`));
+        throw new Error(`Device at ${path} not found`);
+      }
+    }
+    // Otherwise send to first device (legacy behavior)
+    else {
+      send(command + '\n');
+      const firstDevice = devices.length > 0 ? devices[0] : null;
+      const deviceInfo = firstDevice ? `[Device ${firstDevice.deviceID}] ${firstDevice.path}` : 'first device';
+      console.log(`📤 ${deviceInfo} ← ${command}`);
+    }
+    
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.post('/api/disconnect', async (req, res) => {
@@ -634,14 +967,31 @@ app.post('/api/comm-mode', (req, res) => {
 // Wi-Fi join + Windows scan
 app.post('/api/wifi-join', (req, res) => {
   try {
-    const { ssid, password } = req.body || {};
+    const { ssid, password, deviceId } = req.body || {};
     if (!ssid) throw new Error('Missing ssid');
     const esc = s => '"' + String(s).replace(/"/g, '\\"') + '"';
     const cmd = `WIFI_JOIN ${esc(ssid)} ${esc(password || '')}`;
-    send(cmd + '\n');
+    
+    // Send to specific device if deviceId provided, otherwise first device
+    if (deviceId !== undefined && devices.length > 0) {
+      const device = devices.find(d => d.deviceID === deviceId || d.id === deviceId);
+      if (device) {
+        sendToDevice(device.id, cmd + '\n');
+        console.log(`📡 Sent WiFi join to Device ${deviceId}`);
+      } else {
+        throw new Error(`Device ${deviceId} not found`);
+      }
+    } else if (serial && serial.isOpen) {
+      send(cmd + '\n');
+    } else if (devices.length === 0) {
+      throw new Error('No device connected - please connect a TDS-8 first');
+    } else {
+      throw new Error('Serial port not available - device may be disconnecting');
+    }
+    
     res.json({ ok: true });
   } catch (e) { 
-    console.error(`Error:`, e.message);
+    console.error(`❌ WiFi join error:`, e.message);
     res.status(400).json({ error: e.message }); 
   }
 });
@@ -756,15 +1106,38 @@ app.post('/api/trackname', (req, res) => {
     const at = (actualTrack !== undefined) ? actualTrack : Number(index);
     const cmd = `/trackname ${index} "${esc}" ${at}\n`;
     
-    console.log('📤 [DEBUG] Command parts:', {
+    // Calculate which device should receive this track (based on actualTrack)
+    const targetDeviceId = Math.floor(at / 8);
+    
+    console.log('📤 [TRACKNAME] Routing:', {
       index,
-      originalName: name,
-      escapedName: esc,
+      name: name,
       actualTrack: at,
-      fullCommand: cmd.trim()
+      targetDeviceId,
+      devicesCount: devices.length,
+      availableDevices: devices.map(d => `ID=${d.deviceID}`).join(', ')
     });
     
-    send(cmd);
+    // Route to correct device if multi-device mode
+    if (devices.length > 1) {
+      console.log(`🔍 [ROUTING] Looking for deviceId=${targetDeviceId} for track ${at}`);
+      const targetDevice = devices.find(d => d.deviceID === targetDeviceId || d.id === targetDeviceId);
+      if (targetDevice) {
+        sendToDevice(targetDevice.id, cmd);
+        console.log(`📤 [Device ${targetDeviceId}] ${targetDevice.path} ← Track ${at}: "${name}"`);
+      } else {
+        console.warn(`⚠️ Device ${targetDeviceId} not found for track ${at}. Available:`, devices.map(d => `[ID=${d.deviceID}, path=${d.path}]`).join(', '));
+        console.warn(`⚠️ Falling back to first device`);
+        send(cmd);
+      }
+    } else {
+      // Single device mode
+      const firstDevice = devices.length > 0 ? devices[0] : null;
+      const deviceInfo = firstDevice ? `[Device ${firstDevice.deviceID}] ${firstDevice.path}` : 'device';
+      send(cmd);
+      console.log(`📤 ${deviceInfo} ← Track ${at}: "${name}"`);
+    }
+    
     // Persist asynchronously; ignore errors
     try { fs.promises.writeFile(TRACK_NAMES_PATH, JSON.stringify(currentTrackNames, null, 2), 'utf8'); } catch {}
     res.json({ ok: true });
@@ -800,7 +1173,7 @@ app.post('/api/osc-send', (req, res) => {
       })) : []
     };
     
-    port.send(oscMsg, "127.0.0.1", 9000);
+    port.send(oscMsg, M4L_IP, M4L_PORT);
     const logMessage = `📡 OSC sent to M4L: ${address} ${args ? args.join(' ') : ''}`;
     console.log(logMessage);
     wsBroadcast({ type: 'log', level: 'info', message: logMessage });
@@ -828,6 +1201,51 @@ app.get('/api/device-status', (req, res) => {
     ip: deviceIP || '—',
     connectionType: connectionType
   });
+});
+
+// Diagnostic endpoint - check OSC port status
+app.get('/api/osc-status', (req, res) => {
+  const now = Date.now();
+  const timeSinceLastHi = lastHiTime ? now - lastHiTime : null;
+  const abletonConnected = timeSinceLastHi !== null && timeSinceLastHi < 30000;
+  
+  const socketReady = udpPort && udpPort.socket && udpPort.socket._handle ? true : false;
+  
+  res.json({
+    ok: true,
+    oscSenderPort: 9001,
+    oscListenerPort: 8000,
+    deviceListenerPort: 9000,
+    m4lTargetPort: 9000,
+    m4lTargetIP: M4L_IP,
+    lastHiReceived: lastHiTime ? new Date(lastHiTime).toISOString() : 'Never',
+    timeSinceLastHi: timeSinceLastHi ? `${Math.floor(timeSinceLastHi / 1000)}s ago` : 'Never',
+    abletonConnected: abletonConnected,
+    udpPortInitialized: udpPort !== null,
+    udpSocketReady: socketReady,
+    oscListenerInitialized: oscListener !== null,
+    connectedDevices: devices.length,
+    deviceList: devices.map(d => ({ id: d.deviceID, path: d.path, version: d.version }))
+  });
+  
+  console.log('🔍 [OSC STATUS] Diagnostic check:', {
+    abletonConnected,
+    lastHi: lastHiTime ? `${Math.floor(timeSinceLastHi / 1000)}s ago` : 'Never',
+    oscSenderReady: socketReady,
+    oscListenerReady: oscListener !== null,
+    connectedDevices: devices.length
+  });
+});
+
+// Test endpoint - manually send /hello to M4L
+app.post('/api/osc-test', (req, res) => {
+  console.log('🧪 [TEST] Manually sending /hello to M4L...');
+  try {
+    sendOSC('/hello', []);
+    res.json({ ok: true, message: 'Sent /hello to M4L - check console for response' });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // Firmware — check single manifest
@@ -918,11 +1336,11 @@ server.listen(PORT, () => {
   console.log('         TDS-8 Bridge - Port Configuration');
   console.log('========================================================');
   console.log(`  HTTP Server:    http://localhost:${PORT}`);
-  console.log('  OSC Listener:   0.0.0.0:8000 (receives from M4L)');
-  console.log('  OSC Sender:     127.0.0.1:9001 -> 127.0.0.1:9000');
+  console.log(`  OSC Listener:   0.0.0.0:${OSC_LISTEN_PORT} (receives from M4L)`);
+  console.log(`  OSC Sender:     127.0.0.1:9001 -> 127.0.0.1:${M4L_PORT}`);
   console.log('  WebSocket:      ws://localhost:8088');
   console.log('========================================================');
-  console.log('  M4L should send OSC to: 127.0.0.1:8000');
-  console.log('  M4L should listen on:   port 9000');
+  console.log(`  M4L should send OSC to: 127.0.0.1:${OSC_LISTEN_PORT}`);
+  console.log(`  M4L should listen on:   port ${M4L_PORT}`);
   console.log('========================================================\n');
 });

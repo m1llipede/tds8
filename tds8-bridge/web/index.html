@@ -38,12 +38,12 @@ select.input{cursor:pointer}
 .btn.sm{padding:6px 10px;font-size:12px}
 .btn-group{display:flex;gap:8px;flex-wrap:wrap}
 .device-list{display:flex;flex-direction:column;gap:6px}
-.device-item{background:#fafbff;border:2px solid #e3e6ef;border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;transition:all .2s}
-.device-item:hover{border-color:var(--brand);background:#fff}
-.device-item.connected{border-color:var(--brand);background:#fff8f0}
+.device-item{background:#f3f4f6;border:2px solid #d1d5db;border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;transition:all .2s;opacity:0.6}
+.device-item:hover{border-color:var(--brand);background:#fff;opacity:1}
+.device-item.connected{border-color:var(--brand);background:#fff8f0;opacity:1}
 .device-name{font-weight:600;font-size:14px;color:var(--text)}
 .device-status{font-size:11px;color:#10b981;margin-top:2px}
-.trackgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.trackgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;max-height:500px;overflow-y:auto;padding-right:8px}
 .trackrow{display:flex;gap:8px;align-items:center}
 .trackrow label{margin:0;min-width:60px;font-weight:600;font-size:12px;color:var(--text)}
 .trackrow .input{padding:6px 8px;font-size:12px}
@@ -71,7 +71,11 @@ select.input{cursor:pointer}
 </style>
 </head>
 <body>
-  <div class="wrap">
+  <div id="splash" style="position:fixed;z-index:9999;top:0;left:0;width:100vw;height:100vh;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+    <img src="tds8-logo.png" alt="TDS-8 Logo" style="max-width:200px;margin-bottom:24px;">
+    <img src="playoptix-logo.png" alt="Playoptix Logo" style="max-width:160px;">
+  </div>
+  <div class="wrap" style="display:none;" id="mainApp">
     <!-- Connection Status Banner -->
     <div id="connectionBanner" style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:12px 20px;margin-bottom:16px;border-radius:8px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,0.1)">
       <div style="display:flex;align-items:center;gap:16px">
@@ -137,26 +141,28 @@ select.input{cursor:pointer}
 
         <!-- Track Names -->
         <div class="card">
-          <div class="hdr"><h1>🎵 Track Names</h1></div>
-          <div class="body">
+          <div class="hdr" style="display:flex;justify-content:space-between;align-items:center"><h1>🎵 Track Names</h1></div>
+          <div class="body" style="display:flex;flex-direction:column;min-height:0;max-height:500px;overflow-y:auto;">
+            <div class="btn-group" id="trackBtnGroup" style="margin-bottom:12px"></div>
             <!-- Offset Controls -->
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:12px;background:#fafbff;border-radius:8px;border:2px solid #e3e6ef">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:6px 10px;background:#fafbff;border-radius:8px;border:1.5px solid #e3e6ef;max-width:340px;align-self:center;">
               <button id="btnOffsetLeft" class="btn ghost sm" title="Previous track">◀</button>
               <div style="flex:1;text-align:center">
-                <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Track Offset</div>
-                <div style="font-size:18px;font-weight:600;color:var(--brand)" id="offsetDisplay">0</div>
-                <div style="font-size:10px;color:var(--muted);margin-top:2px">Showing tracks <span id="offsetRange">1-8</span></div>
+                <div style="font-size:10px;color:var(--muted);margin-bottom:2px">Track Offset</div>
+                <div style="font-size:15px;font-weight:600;color:var(--brand)" id="offsetDisplay">0</div>
+                <div style="font-size:9px;color:var(--muted);margin-top:1px">Showing tracks <span id="offsetRange">1-8</span></div>
               </div>
               <button id="btnOffsetRight" class="btn ghost sm" title="Next track">▶</button>
             </div>
             
-            <div class="trackgrid" id="tracks"></div>
+            <div class="trackgrid" id="tracks" style="overflow-y:auto;max-height:320px;"></div>
             <div class="divider"></div>
             <div class="btn-group" style="margin-bottom:8px">
               <button id="btnRefresh" class="btn primary">🔄 Refresh from Ableton</button>
+              <button id="btnTestOSC" class="btn secondary sm">🧪 Test OSC</button>
               <button id="btnReadTracks" class="btn secondary sm">Load Stored Tracks</button>
               <button id="btnSendAll" class="btn ghost sm">Update All Tracks</button>
-              <button id="btnResetTracks" class="btn ghost sm">Reset to Defaults</button>
+              <button id="btnResetTracks" class="btn ghost sm">Clear All Tracks</button>
             </div>
           </div>
         </div>
@@ -273,6 +279,8 @@ let savedWifiNetworks = [];
 let deviceSerialNumber = 'Unknown';
 let currentConnectionType = 'none'; // 'none', 'wired', 'wifi'
 let currentConnectionIP = '—';
+let deviceVersions = new Map(); // Store firmware versions by port path
+let deviceIdMap = new Map(); // Map serial numbers to device IDs for persistence
 
 // Update connection status banner
 function updateConnectionBanner(type, ip) {
@@ -381,25 +389,106 @@ async function scanDevices() {
     // Show "TDS-8" with port name
     const portName = p.path.split('/').pop(); // Get last part of path (e.g., "cu.usbmodem101")
     const displayName = isConnected ? `TDS-8 (${portName})` : `${deviceName} (${portName})`;
-    const statusText = isConnected ? '<div class="device-status">Connected via USB</div>' : '';
+    
+    // Get firmware version and device info if available
+    const version = deviceVersions.get(p.path);
+    const versionBadge = version ? `<span style="font-size:10px;padding:2px 6px;background:#10b981;color:#fff;border-radius:4px;margin-left:8px">v${version}</span>` : '';
+    
+    // Get device ID and track range if connected
+    const deviceInfo = connectedDevices.get(p.path);
+    const trackInfo = deviceInfo ? ` - Tracks ${deviceInfo.trackRange}` : '';
+    
+    const statusText = isConnected 
+      ? `<div class="device-status">✓ Connected via USB${trackInfo}</div>` 
+      : `<div style="font-size:11px;color:#6b7280;margin-top:2px">⚪ Disconnected</div>`;
     
     // Update footer with serial number if connected
     if (isConnected && p.serialNumber) {
       updateFooterSerial(p.serialNumber);
     }
     
+    // Device ID selector - check deviceIdMap first, then connectedDevices
+    let selectedDeviceId = null;
+    if (p.serialNumber && deviceIdMap.has(p.serialNumber)) {
+      selectedDeviceId = deviceIdMap.get(p.serialNumber);
+    } else if (deviceInfo) {
+      selectedDeviceId = deviceInfo.deviceId;
+    }
+    
+    const deviceIdSelector = `
+      <select class="input" style="width:80px;font-size:11px;padding:4px 6px;margin-right:8px" data-path="${p.path}">
+        <option value="0" ${selectedDeviceId === 0 ? 'selected' : ''}>1-8</option>
+        <option value="1" ${selectedDeviceId === 1 ? 'selected' : ''}>9-16</option>
+        <option value="2" ${selectedDeviceId === 2 ? 'selected' : ''}>17-24</option>
+        <option value="3" ${selectedDeviceId === 3 ? 'selected' : ''}>25-32</option>
+      </select>
+    `;
+    
     item.innerHTML = `
-      <div>
-        <div class="device-name">${displayName}</div>
-        ${statusText}
+      <div style="display:flex;align-items:center;gap:8px;flex:1">
+        <div style="cursor:move;color:#9ca3af;font-size:16px" title="Drag to reorder">⋮⋮</div>
+        <div style="flex:1">
+          <div class="device-name">${displayName}${versionBadge}</div>
+          ${statusText}
+        </div>
       </div>
-      <button class="btn sm ${isConnected ? 'ghost active' : 'primary'}" data-path="${p.path}" data-name="${deviceName}">
-        ${isConnected ? 'Connected' : 'Connect'}
-      </button>
+      <div style="display:flex;align-items:center;gap:8px">
+        ${deviceIdSelector}
+        <button class="btn sm ${isConnected ? 'ghost active' : 'primary'}" data-path="${p.path}" data-name="${deviceName}">
+          ${isConnected ? 'Connected' : 'Connect'}
+        </button>
+      </div>
     `;
     
     const btn = item.querySelector('button');
     btn.onclick = () => isConnected ? disconnect(p.path) : connect(p.path, deviceName, p.serialNumber);
+    
+    // Add event handler for device ID selector
+    const selector = item.querySelector('select');
+    selector.onchange = (e) => {
+      const newDeviceId = parseInt(e.target.value);
+      const path = e.target.dataset.path;
+      
+      // Update the device ID mapping
+      if (p.serialNumber) {
+        deviceIdMap.set(p.serialNumber, newDeviceId);
+        log(`📝 Manually set Device ID ${newDeviceId} for ${p.serialNumber}`, 'info');
+      }
+      
+      // If device is connected, send DEVICE_ID command and update
+      if (connectedDevices.has(path)) {
+        const trackRange = `${newDeviceId * 8 + 1}-${(newDeviceId + 1) * 8}`;
+        const deviceInfo = connectedDevices.get(path);
+        const oldDeviceId = deviceInfo.deviceId;
+        deviceInfo.deviceId = newDeviceId;
+        deviceInfo.trackRange = trackRange;
+        
+        // Send DEVICE_ID command to the specific device by path
+        console.log(`[DROPDOWN] Sending DEVICE_ID ${newDeviceId} to path: ${path}`);
+        fetch('/api/send-command', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ 
+            command: `DEVICE_ID ${newDeviceId}`,
+            path: path  // Specify which device to send to
+          })
+        }).then(res => res.json()).then(data => {
+          if (!data.ok) {
+            console.error('[DROPDOWN] Failed to send command:', data.error);
+          }
+        });
+        
+        log(`✓ Updated ${displayName} to Device ID ${newDeviceId} - Tracks ${trackRange}`, 'out');
+        scanDevices();
+        buildTrackGrid();
+        
+        // Send track names for the new device ID range
+        setTimeout(async () => {
+          await sendTrackNamesForDevice(newDeviceId);
+        }, 500);
+      }
+    };
+    
     list.appendChild(item);
   });
   
@@ -451,20 +540,68 @@ async function populateAlternateCOMPorts() {
 async function connect(path, name, serialNum, retryCount = 0) {
   try {
     log(`🔌 Connecting to ${name || path}...`, 'info');
+    
+    // Check if this device has a saved ID (by serial number) or manually selected ID
+    let deviceId;
+    
+    // First check if user manually selected an ID via dropdown
+    const selector = document.querySelector(`select[data-path="${path}"]`);
+    const manualId = selector ? parseInt(selector.value) : null;
+    
+    if (manualId !== null && !isNaN(manualId)) {
+      // Use manually selected ID
+      deviceId = manualId;
+      if (serialNum) {
+        deviceIdMap.set(serialNum, deviceId);
+      }
+      log(`👆 Using manually selected Device ID ${deviceId}`, 'info');
+    } else if (serialNum && deviceIdMap.has(serialNum)) {
+      // Restore previously saved ID
+      deviceId = deviceIdMap.get(serialNum);
+      log(`📌 Restored Device ID ${deviceId} for serial ${serialNum}`, 'info');
+    } else {
+      // Auto-assign next available ID (0-3)
+      const usedIds = new Set(Array.from(deviceIdMap.values()));
+      deviceId = 0;
+      while (usedIds.has(deviceId) && deviceId < 4) {
+        deviceId++;
+      }
+      if (serialNum) {
+        deviceIdMap.set(serialNum, deviceId);
+        log(`🆕 Auto-assigned Device ID ${deviceId} to serial ${serialNum}`, 'info');
+      }
+    }
+    
+    const trackRange = `${deviceId * 8 + 1}-${(deviceId + 1) * 8}`;
+    
     const res = await fetch('/api/connect', { 
       method:'POST', 
       headers:{'Content-Type':'application/json'}, 
-      body: JSON.stringify({ path }) 
+      body: JSON.stringify({ path, deviceId }) // Pass device ID to backend
     });
     const j = await res.json();
     if (j.ok) {
-      connectedDevices.set(path, { name, path, serialNum });
+      connectedDevices.set(path, { name, path, serialNum, deviceId, trackRange });
       currentDevice = path;
       updateFooterSerial(serialNum);
       updateConnectionStatus(true);
       updateConnectionBanner('wired', '127.0.0.1');
-      log(`✓ Connected to ${name || path}`, 'out');
+      
+      // Backend now sends DEVICE_ID command, no need to send it here
+      
+      // Wait for version info before logging
+      setTimeout(() => {
+        const version = deviceVersions.get(path) || 'Unknown';
+        log(`✓ Connected to ${name || path} v${version} - Device ID ${deviceId} - Tracks ${trackRange}`, 'out');
+      }, 1000);
+      
       scanDevices();
+      buildTrackGrid(); // Rebuild track grid with new device rows
+      
+      // Send track names for this device's range after connection
+      setTimeout(async () => {
+        await sendTrackNamesForDevice(deviceId);
+      }, 1500);
     } else {
       log(`✗ Connection failed: ${j.error || 'Unknown error'}`, 'err');
       // Only retry once
@@ -533,31 +670,50 @@ function updateOffsetUI() {
 function buildTrackGrid() {
   const host = $('#tracks');
   host.innerHTML = '';
-  for (let i = 0; i < 8; i++) {
-    const row = document.createElement('div');
-    row.className = 'trackrow';
+  
+  // Always show manual track entry fields, even if no device is connected
+
+  // Calculate total tracks based on connected devices (up to 4 devices = 32 tracks)
+  const numDevices = Math.max(1, connectedDevices.size);
+  const totalTracks = Math.min(numDevices * 8, 32);
+  
+  // Add device separators
+  for (let deviceIdx = 0; deviceIdx < numDevices; deviceIdx++) {
+    // Add device header (always show, even for single device)
+    const header = document.createElement('div');
+    header.style.cssText = 'padding:8px 12px;background:#f3f4f6;border-radius:6px;margin:12px 0 8px 0;font-weight:600;font-size:12px;color:#374151;grid-column:1/-1';
+    header.textContent = `🎛️ TDS-8 Device ${deviceIdx + 1} (Tracks ${deviceIdx * 8 + 1}-${(deviceIdx + 1) * 8})`;
+    host.appendChild(header);
     
-    const label = document.createElement('label');
-    label.textContent = `Track ${i + 1}`;
-    
-    const input = document.createElement('input');
-    input.className = 'input';
-    input.id = 'tname' + i;
-    input.name = `track-${i}`;
-    input.value = `Track ${i + 1}`;
-    input.placeholder = `Track ${i + 1}`;
-    input.oninput = () => saveLocalTrackNames();
-    
-    row.appendChild(label);
-    row.appendChild(input);
-    host.appendChild(row);
+    // Add 8 tracks for this device
+    for (let localIdx = 0; localIdx < 8; localIdx++) {
+      const globalIdx = deviceIdx * 8 + localIdx;
+      const row = document.createElement('div');
+      row.className = 'trackrow';
+      
+      const label = document.createElement('label');
+      label.textContent = `Track ${globalIdx + 1}`;
+      
+      const input = document.createElement('input');
+      input.className = 'input';
+      input.id = 'tname' + globalIdx;
+      input.name = `track-${globalIdx}`;
+      input.value = '';
+      input.placeholder = `${globalIdx + 1}`;
+      input.oninput = () => saveLocalTrackNames();
+      
+      row.appendChild(label);
+      row.appendChild(input);
+      host.appendChild(row);
+    }
   }
 }
 
 // ----- Local persistence for Track Names -----
 function saveLocalTrackNames() {
   const names = [];
-  for (let i = 0; i < 8; i++) {
+  // Save up to 32 tracks
+  for (let i = 0; i < 32; i++) {
     const el = document.getElementById('tname' + i);
     names.push(el ? el.value : '');
   }
@@ -569,10 +725,26 @@ function loadLocalTrackNames() {
     const raw = localStorage.getItem('tds8_tracknames');
     if (!raw) return false;
     const names = JSON.parse(raw);
-    if (!Array.isArray(names) || names.length !== 8) return false;
-    for (let i = 0; i < 8; i++) {
+    if (!Array.isArray(names)) return false;
+    
+    // Check if localStorage contains placeholder text or just numbers and clear it
+    const hasPlaceholders = names.some(name => {
+      if (!name) return false;
+      // Match "Track 1", "Track 2", etc. OR just numbers "1", "2", "9", "10", etc.
+      return /^Track \d+$/i.test(name) || /^\d+$/.test(name);
+    });
+    if (hasPlaceholders) {
+      console.log('⚠️ Clearing localStorage with placeholder/number text');
+      localStorage.removeItem('tds8_tracknames');
+      return false;
+    }
+    
+    // Load up to 32 tracks (or however many are in storage)
+    for (let i = 0; i < Math.min(32, names.length); i++) {
       const el = document.getElementById('tname' + i);
-      if (el) el.value = names[i] || '';
+      if (el && names[i]) {  // Only set if there's a non-empty value
+        el.value = names[i];
+      }
     }
     log('✓ Loaded track names from localStorage', 'info');
     return true;
@@ -581,13 +753,10 @@ function loadLocalTrackNames() {
 
 $('#btnReadTracks').onclick = async () => {
   log('📖 Reading stored track names...', 'info');
-  
   try {
     const res = await fetch('/api/tracknames');
     const data = await res.json();
-    
     if (data.ok && data.names) {
-      // Populate the UI fields with stored track names
       for (let i = 0; i < 8 && i < data.names.length; i++) {
         const inputElement = document.getElementById('tname' + i);
         if (inputElement) {
@@ -595,6 +764,8 @@ $('#btnReadTracks').onclick = async () => {
         }
       }
       log(`✓ Loaded ${data.names.length} track names from bridge`, 'out');
+      // Auto-send track names to devices after loading
+      $('#btnSendAll').click();
     } else {
       log('✗ Failed to read track names', 'err');
     }
@@ -605,13 +776,21 @@ $('#btnReadTracks').onclick = async () => {
 
 
 $('#btnResetTracks').onclick = () => {
-  for (let i = 0; i < 8; i++) {
+  const numDevices = Math.max(1, connectedDevices.size);
+  const totalTracks = Math.min(numDevices * 8, 32);
+  
+  // Clear all track inputs
+  for (let i = 0; i < totalTracks; i++) {
     const inputElement = document.getElementById('tname' + i);
     if (inputElement) {
-      inputElement.value = `Track ${i + 1}`;
+      inputElement.value = '';  // Clear to empty
     }
   }
-  log('Reset track names to defaults (Track 1-8)', 'info');
+  
+  // Clear localStorage
+  try { localStorage.removeItem('tds8_tracknames'); } catch {}
+  
+  log(`✓ Cleared all track names`, 'info');
 };
 
 // Offset controls
@@ -660,32 +839,42 @@ $('#btnRefresh').onclick = async () => {
   }, 400);
 };
 
-$('#btnSendAll').onclick = async () => {
-  if (!currentDevice) {
-    log('✗ Please connect TDS-8 device first (not Ableton)', 'err');
-    return;
+// Test OSC button - manually test OSC connection
+$('#btnTestOSC').onclick = async () => {
+  log(`🧪 Testing OSC connection to M4L...`, 'info');
+  
+  try {
+    const res = await fetch('/api/osc-test', {
+      method: 'POST'
+    });
+    
+    const data = await res.json();
+    if (data.ok) {
+      log(`✓ ${data.message}`, 'out');
+      log(`Check bridge console for "📤 OSC → M4L" message`, 'info');
+      log(`If M4L responds, you'll see "✓ Received /hi from M4L"`, 'info');
+    } else {
+      log(`✗ ${data.error}`, 'err');
+    }
+  } catch (err) {
+    log(`✗ Error: ${err.message}`, 'err');
   }
+};
+
+// Send track names for a specific device based on its device ID
+async function sendTrackNamesForDevice(deviceId) {
+  const startTrack = deviceId * 8;
+  const endTrack = startTrack + 8;
+  
   let count = 0;
-  for (let i = 0; i < 8; i++) {
-    // Get the manual name entered by the user
+  for (let i = startTrack; i < endTrack; i++) {
     const inputElement = document.getElementById('tname' + i);
     const name = inputElement ? inputElement.value.trim() : '';
     
-    // Debug: log the actual value being read
-    console.log(`[DEBUG] Track ${i}:`, {
-      elementId: 'tname' + i,
-      found: !!inputElement,
-      rawValue: inputElement ? inputElement.value : 'N/A',
-      trimmedValue: name,
-      length: name.length
-    });
-    
-    // Calculate actual track number (device adds +1 internally, so send 0-based)
-    const actualTrack = i;
-    
     if (name) {
-      const payload = { index: i, name, actualTrack };
-      console.log(`[DEBUG] Sending to API:`, payload);
+      const localIndex = i - startTrack;
+      const payload = { index: localIndex, name, actualTrack: i };
+      console.log(`[AUTO-SEND] Track ${i} to Device ${deviceId}, local index ${localIndex}: "${name}"`);
       await fetch('/api/trackname', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -695,10 +884,44 @@ $('#btnSendAll').onclick = async () => {
       await new Promise(r => setTimeout(r, 20));
     }
   }
-  // Save to localStorage after sending all
+  
+  if (count > 0) {
+    log(`✓ Sent ${count} track names to Device ${deviceId} (Tracks ${startTrack + 1}-${endTrack})`, 'out');
+  }
+}
+
+$('#btnSendAll').onclick = async () => {
+  // Only send the names currently in the manual fields
+  const trackToDevice = new Map();
+  connectedDevices.forEach((deviceInfo, path) => {
+    const deviceId = deviceInfo.deviceId;
+    const startTrack = deviceId * 8;
+    const endTrack = startTrack + 8;
+    for (let t = startTrack; t < endTrack; t++) {
+      trackToDevice.set(t, { deviceId, localIndex: t - startTrack });
+    }
+  });
+  let count = 0;
+  for (let i = 0; i < 32; i++) {
+    const inputElement = document.getElementById('tname' + i);
+    const name = inputElement ? inputElement.value.trim() : '';
+    if (name && trackToDevice.has(i)) {
+      const { deviceId, localIndex } = trackToDevice.get(i);
+      const payload = { index: localIndex, name, actualTrack: i };
+      await fetch('/api/trackname', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      count++;
+      await new Promise(r => setTimeout(r, 20));
+    }
+  }
   saveLocalTrackNames();
-  log(`✓ Updated ${count} track names`, 'out');
+  log(`✓ Updated ${count} track names to connected devices`, 'out');
 };
+// Change label for 'Clear All Tracks' to 'Reset Track Names'
+document.getElementById('btnResetTracks').textContent = 'Reset Track Names';
 
 // ----- Modals -----
 
@@ -1060,8 +1283,38 @@ $('#cmd').onkeypress = (e) => {
       // Check device status after serial opens
       setTimeout(() => checkDeviceStatus(), 1000);
     }
+    
+    // Handle serial port close (device disconnected)
+    if (msg.type === 'serial-close') {
+      log(`⚠️ Serial port closed: ${msg.path}`, 'warn');
+      connectedDevices.delete(msg.path);
+      if (currentDevice === msg.path) {
+        currentDevice = null;
+        updateConnectionStatus(false);
+      }
+      scanDevices();
+      buildTrackGrid();
+    }
+    
+    // Handle multi-device connection
+    if (msg.type === 'multi-device-connected') {
+      msg.devices.forEach(d => {
+        if (d.ok) {
+          connectedDevices.set(d.path, { deviceId: d.deviceId, tracks: `${d.deviceId * 8 + 1}-${(d.deviceId + 1) * 8}` });
+        }
+      });
+      scanDevices();
+    }
     if (msg.type === 'serial-error') log(`✗ Serial error: ${msg.message}`, 'err');
-    if (msg.type === 'device-version') log(`Device version: ${msg.version}`, 'info');
+    if (msg.type === 'device-version') {
+      log(`Device version: ${msg.version}`, 'info');
+      // Store version for display - use path if provided, otherwise currentDevice
+      const devicePath = msg.path || currentDevice;
+      if (devicePath) {
+        deviceVersions.set(devicePath, msg.version);
+        scanDevices(); // Refresh device list to show version
+      }
+    }
     
     // Handle device mode update (on startup)
     if (msg.type === 'device-mode') {
@@ -1264,14 +1517,42 @@ async function checkDeviceStatus() {
 }
 
 // ----- Init -----
-loadSavedNetworks();
-buildTrackGrid();
-updateOffsetUI();
-// Load track names from localStorage (instant restore of manual entries)
-loadLocalTrackNames();
-checkDeviceStatus(); // Check if device is already connected
-scanDevices();
-setInterval(scanDevices, 5000);
+setTimeout(() => {
+  document.getElementById('splash').style.display = 'none';
+  document.getElementById('mainApp').style.display = '';
+  buildTrackGrid();
+  updateOffsetUI();
+  // Do NOT load track names yet
+  scanDevices();
+  setInterval(scanDevices, 5000);
+  checkDeviceStatus();
+}, 3000);
+// Also auto-scan devices on DOMContentLoaded
+window.addEventListener('DOMContentLoaded', () => {
+  scanDevices();
+});
+// Load track numbers only at start
+function buildTrackGrid(showNames = false) {
+  const offset = getCurrentOffset();
+  const grid = document.getElementById('tracks');
+  if (!grid) return;
+  grid.innerHTML = '';
+  for (let i = 0; i < 8; i++) {
+    const row = document.createElement('div');
+    row.className = 'trackrow';
+    const label = document.createElement('label');
+    label.textContent = `Track ${offset + i + 1}`;
+    row.appendChild(label);
+    const input = document.createElement('input');
+    input.className = 'input';
+    input.type = 'text';
+    input.id = 'tname' + i;
+    input.value = showNames && window.trackNames && window.trackNames[i] ? window.trackNames[i] : '';
+    input.placeholder = '';
+    row.appendChild(input);
+    grid.appendChild(row);
+  }
+}
 // Auto-scan WiFi networks on startup
 setTimeout(async () => {
   try {
@@ -1306,6 +1587,60 @@ if (refreshBtn) {
     log('🔄 Manually refreshing device list...', 'info');
     await scanDevices();
     log('✓ Device list refreshed', 'out');
+  };
+}
+
+// Multi-device connection button
+const btnConnectMulti = document.getElementById('btnConnectMulti');
+if (btnConnectMulti) {
+  btnConnectMulti.onclick = async () => {
+    try {
+      log('🎛️ Scanning for TDS-8 devices...', 'info');
+      
+      // Get all TDS-8 devices
+      const res = await fetch('/api/ports');
+      if (!res.ok) throw new Error('Failed to scan ports');
+      const ports = await res.json();
+      
+      if (ports.length === 0) {
+        log('✗ No TDS-8 devices found. Please connect devices via USB.', 'err');
+        return;
+      }
+      
+      log(`✓ Found ${ports.length} TDS-8 device(s)`, 'out');
+      log('🔗 Connecting all devices...', 'info');
+      
+      // Connect all devices
+      const portPaths = ports.map(p => p.path);
+      const connectRes = await fetch('/api/connect-multi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ports: portPaths })
+      });
+      
+      if (!connectRes.ok) throw new Error('Failed to connect devices');
+      const result = await connectRes.json();
+      
+      // Show results and update UI
+      result.devices.forEach(d => {
+        if (d.ok) {
+          log(`✓ Device ${d.deviceId} connected: ${d.path} (Tracks ${d.deviceId * 8 + 1}-${(d.deviceId + 1) * 8})`, 'out');
+          // Mark device as connected in UI
+          connectedDevices.set(d.path, { deviceId: d.deviceId, tracks: `${d.deviceId * 8 + 1}-${(d.deviceId + 1) * 8}` });
+        } else {
+          log(`✗ Failed to connect ${d.path}: ${d.error}`, 'err');
+        }
+      });
+      
+      // Refresh device list to show connected status
+      await scanDevices();
+      
+      log('✅ Multi-device setup complete!', 'out');
+      log('💡 Device IDs have been auto-assigned. Tracks will be routed automatically.', 'info');
+      
+    } catch (err) {
+      log(`✗ Multi-device connection failed: ${err.message}`, 'err');
+    }
   };
 }
 
