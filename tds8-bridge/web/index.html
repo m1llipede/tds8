@@ -193,6 +193,7 @@ select.input{cursor:pointer}
               <div><code>/reannounce</code></div>
               <div><code>/hello</code></div>
               <div><code>/trackname index "Name" actualTrack</code> - Example: <code>/trackname 0 "Kick" 0</code></div>
+              <div><code>/ipupdate</code> - device IP update (WiFi mode)</div>
             </div>
           </div>
         </div>
@@ -435,7 +436,7 @@ async function scanDevices() {
     
     // Create device item HTML
     const deviceIdOptions = [0, 1, 2, 3].map(id => 
-      `<option value="${id}">Tracks ${id * 8 + 1}-${(id + 1) * 8}</option>`
+      `<option value="${id}" ${id === idx ? 'selected' : ''}>Tracks ${id * 8 + 1}-${(id + 1) * 8}</option>`
     ).join('');
     
     item.innerHTML = `

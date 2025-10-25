@@ -246,14 +246,18 @@ function initOSCListener() {
                     const esc = String(nameRaw).replace(/"/g, '\\"');
                     
                     // Multi-device: Route to correct device based on track number
-                    if (devices.length > 1) {
-                        console.log(`🔍 [ROUTING] Looking for deviceId=${deviceId} for track ${actualTrack}`);
-                        const targetDevice = devices.find(d => d.deviceID === deviceId || d.id === deviceId);
-                        if (targetDevice) {
-                            const cmd = `/trackname ${localIndex} "${esc}" ${actualTrack}\n`;
-                            sendToDevice(deviceId, cmd);
-                            console.log(`📍 Routed track ${actualTrack} to Device ${deviceId}, local index ${localIndex}`);
-                        }
+                    const deviceId = Math.floor(actualTrack / 8);
+                    const localIndex = actualTrack % 8;
+                    const targetDevice = devices.find(d => d.id === deviceId);
+
+                    if (targetDevice) {
+                        const cmd = `/trackname ${localIndex} "${esc}" ${actualTrack}\n`;
+                        sendToDevice(deviceId, cmd);
+                        console.log(`📍 Routed track ${actualTrack} to Device ${deviceId} (local index ${localIndex})`);
+                    } else if (devices.length > 0) {
+                        // Fallback for single connected device if routing fails
+                        const cmd = `/trackname ${displayIndex} "${esc}" ${actualTrack}\n`;
+                        sendToDevice(devices[0].id, cmd);
                     } else {
                         // Single device mode (legacy)
                         if (serial && serial.isOpen) {
