@@ -156,13 +156,10 @@ select.input{cursor:pointer}
             <div class="divider"></div>
             <div class="btn-group" style="margin-bottom:8px">
               <button id="btnRefresh" class="btn primary">🔄 Refresh from Ableton</button>
-              <button id="btnReadTracks" class="btn secondary sm">Load Stored Tracks</button>
               <button id="btnSendAll" class="btn ghost sm">Update All Tracks</button>
               <button id="btnResetTracks" class="btn ghost sm">Clear All Tracks</button>
-              <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-left:8px;cursor:pointer">
-                <input type="checkbox" id="mirrorOSC" checked style="cursor:pointer"/>
-                Also send to Ableton (OSC)
-              </label>
+              <button id="btnSaveTracks" class="btn secondary sm">Save Current Tracks</button>
+              <button id="btnReadTracks" class="btn secondary sm">Load Stored Tracks</button>
             </div>
           </div>
         </div>
@@ -723,6 +720,31 @@ function resetTracks() {
   log(`✓ Cleared all track names`, 'info');
 };
 
+async function saveTracksToBridge() {
+  log('💾 Saving track names to bridge...', 'info');
+  const names = [];
+  for (let i = 0; i < 32; i++) {
+    const el = document.getElementById('tname' + i);
+    names.push(el ? el.value : '');
+  }
+
+  try {
+    const res = await fetch('/api/tracknames', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ names })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      log('✓ Track names saved to bridge successfully', 'out');
+    } else {
+      log(`✗ Failed to save track names: ${data.error || 'Unknown error'}`, 'err');
+    }
+  } catch (err) {
+    log(`✗ Error saving track names: ${err.message}`, 'err');
+  }
+}
+
 // All button handlers moved to DOMContentLoaded
 
 async function refreshFromAbleton() {
@@ -864,19 +886,6 @@ async function sendAllTracks() {
         } else {
           count++;
           console.log(`[DEBUG] Successfully sent track ${i}`);
-          // Optionally mirror to Ableton (OSC) if enabled
-          const mirror = document.getElementById('mirrorOSC');
-          if (mirror && mirror.checked) {
-            try {
-              await fetch('/api/osc-send', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ address: '/trackname', args: [localIndex, name, i] })
-              });
-            } catch (e) {
-              console.warn('OSC mirror failed:', e);
-            }
-          }
         }
       } catch (err) {
         log(`✗ Error sending track ${i}: ${err.message}`, 'err');
@@ -1483,6 +1492,11 @@ window.addEventListener('DOMContentLoaded', () => {
   if (btnResetTracks) {
     btnResetTracks.textContent = 'Reset Track Names';
     btnResetTracks.onclick = resetTracks;
+  }
+
+  const btnSaveTracks = document.getElementById('btnSaveTracks');
+  if (btnSaveTracks) {
+    btnSaveTracks.onclick = saveTracksToBridge;
   }
 
   // WiFi buttons

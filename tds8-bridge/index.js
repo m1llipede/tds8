@@ -74,6 +74,7 @@ const M4L_PORT = 8001;  // Changed from 9000 to avoid conflicts
 
 // Ableton connection tracking (module scope for API access)
 let abletonConnected = false;
+let abletonGreetingSent = false; // Flag to ensure one-time message
 let lastHiTime = 0;
 let lastHelloResponse = 0;
 
@@ -136,12 +137,14 @@ function initOSCListener() {
                 
                 // Check if we got /hi in last 30 seconds
                 if (lastHiTime && (now - lastHiTime < 30000)) {
-                    if (!abletonConnected) {
-                        abletonConnected = true;
-                        console.log('✓ Ableton connected (received /hi)');
-                        wsBroadcast({ type: 'ableton-connected' });
-                        sendOSC('/ableton_on', []);
+                    if (!abletonGreetingSent) {
+                        console.log('✅ Ableton connection confirmed via /hi handshake');
+                        // Send a one-time alert to all connected devices
+                        sendToAll(`ALERT "Ableton Connected!" 1000\n`);
+                        abletonGreetingSent = true; // Set flag to prevent re-sending
                     }
+                    abletonConnected = true;
+                    wsBroadcast({ type: 'ableton-connected' });
                 } else {
                     if (abletonConnected) {
                         abletonConnected = false;
@@ -1072,6 +1075,26 @@ app.get('/api/tracknames', (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// New endpoint to save all track names to a file
+app.post('/api/tracknames', (req, res) => {
+    const { names } = req.body;
+    if (!Array.isArray(names)) {
+        return res.status(400).json({ ok: false, error: 'Invalid data format' });
+    }
+
+    const filePath = path.join(__dirname, 'track_names.json');
+    const data = JSON.stringify({ names }, null, 2);
+
+    fs.writeFile(filePath, data, 'utf8', (err) => {
+        if (err) {
+            console.error('❌ Error saving track names:', err);
+            return res.status(500).json({ ok: false, error: 'Failed to save track names' });
+        }
+        console.log('💾 Track names saved to track_names.json');
+        res.json({ ok: true });
+    });
+});
+
 app.post('/api/trackname', (req, res) => {
   try {
     const { index, name, actualTrack } = req.body || {};
@@ -1142,6 +1165,32 @@ app.post('/api/activetrack', (req, res) => {
     send(`/activetrack ${index}\n`);
     res.json({ ok: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/send', (req, res) => {
+    try {
+        const { cmd } = req.body;
+        if (!cmd) throw new Error('Missing cmd');
+
+        const upperCmd = cmd.toUpperCase();
+        const broadcastCommands = ['VERSION', 'REBOOT'];
+
+        if (broadcastCommands.includes(upperCmd)) {
+            console.log(`📢 Broadcasting command to all devices: ${cmd}`);
+            sendToAll(cmd + '\n');
+            res.json({ ok: true, message: `Command sent to all devices.` });
+        } else {
+            // Default to sending to the first device for other commands
+            if (devices.length > 0) {
+                sendToDevice(devices[0].id, cmd + '\n');
+                res.json({ ok: true, message: `Command sent to device ${devices[0].id}.` });
+            } else {
+                throw new Error('No devices connected to send command.');
+            }
+        }
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
 });
 
 // Send arbitrary OSC message to M4L

@@ -43,7 +43,7 @@
 #include <WiFiClientSecure.h>
 
 // =======================  Firmware  =======================
-#define FW_VERSION "0.352"   // ← bump this when you publish a new firmware
+#define FW_VERSION "0.351"   // ← bump this when you publish a new firmware
 #define FW_BUILD "2025.10.21-multi-device"  // ← build identifier (date + feature)
 #define GITHUB_MANIFEST_URL "https://raw.githubusercontent.com/m1llipede/tds8/main/manifest.json"
 
@@ -433,7 +433,7 @@ void setup() {
   // Connected?
   if (WiFi.status() == WL_CONNECTED) {
     // WiFi connected
-    showWiFiConnected(WiFi.localIP().toString());
+    showNetworkSplash(WiFi.localIP().toString());
     startRescueAP();  // Keep rescue AP for a window
   } else {
     // WiFi not connected
@@ -772,20 +772,6 @@ void showNetworkSetup() {
   }
 }
 
-void showWiFiConnected(const String& ip) {
-  for (uint8_t i = 0; i < numScreens; i++) {
-    tcaSelect(i);
-    display.invertDisplay(false);
-    display.clearDisplay();
-    display.drawRect(0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1, SSD1306_WHITE);
-    drawLines(2, 10, "WiFi", "Connected!", "");
-    drawCentered("IP: " + ip, 1, 48);
-    display.display();
-  }
-  delay(3000);
-  refreshAll();
-}
-
 void showNetworkSplash(const String& ip) {
   const uint8_t i = 7;  // screen 8 (0-based)
   tcaSelect(i);
@@ -838,22 +824,6 @@ void showAbletonConnectedAll(uint16_t ms) {
   }
   if (ms) delay(ms);
   refreshAll();
-}
-
-// NEW: Show a temporary alert message on all screens
-void showAlertAll(const String& message, uint16_t ms) {
-  for (uint8_t i = 0; i < numScreens; i++) {
-    tcaSelect(i);
-    display.invertDisplay(false);
-    display.clearDisplay();
-    display.drawRect(0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1, SSD1306_WHITE);
-    drawCentered(message, 2, 24);
-    display.display();
-  }
-  if (ms > 0) {
-    delay(ms);
-    refreshAll(); // Restore track names
-  }
 }
 
 void showQuickStartLoop() {
@@ -1764,20 +1734,6 @@ void handleSerialLine(const String& line) {
     delay(500);
     ESP.restart();
     return;
-  }
-
-  // ALERT "message" <duration>
-  if (line.startsWith("ALERT ")) {
-    int firstQuote = line.indexOf('"');
-    int lastQuote = line.lastIndexOf('"');
-    if (firstQuote != -1 && lastQuote > firstQuote) {
-      String msg = line.substring(firstQuote + 1, lastQuote);
-      String durationStr = line.substring(lastQuote + 1);
-      durationStr.trim();
-      int duration = durationStr.toInt();
-      if (duration <= 0) duration = 1000; // Default to 1 sec
-      showAlertAll(msg, duration);
-    }
   }
 
   // /trackname <idx> "name" [actualTrack]
