@@ -43,19 +43,28 @@ select.input{cursor:pointer}
 .device-item.connected{border-color:var(--brand);background:#fff8f0;opacity:1}
 .device-name{font-weight:600;font-size:14px;color:var(--text)}
 .device-status{font-size:11px;color:#10b981;margin-top:2px}
-.trackgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;max-height:500px;overflow-y:auto;padding-right:8px}
-.trackrow{display:flex;gap:8px;align-items:center}
+.trackgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:4px;max-height:650px;overflow-y:scroll;padding-right:8px}
+.trackrow{display:flex;gap:6px;align-items:center}
 .trackrow label{margin:0;min-width:60px;font-weight:600;font-size:12px;color:var(--text)}
-.trackrow .input{padding:6px 8px;font-size:12px}
+.trackrow .input{padding:5px 8px;font-size:12px}
+.track-sep{grid-column:1 / -1;height:6px;border-radius:6px;margin:6px 0;background:linear-gradient(90deg,#ff8800 0%, #8a2be2 100%);opacity:0.3}
+.serial-card{max-height:calc(100vh - 140px);display:flex;flex-direction:column}
+.serial-card .body.flex{flex:1;min-height:0;display:flex;flex-direction:column}
 .icon-card{text-align:center;padding:20px 16px;cursor:pointer;transition:all .2s;border-radius:8px;border:2px solid transparent}
 .icon-card:hover{background:var(--hover);border-color:#e3e6ef;transform:translateY(-1px)}
 .icon-card .icon{font-size:36px;margin-bottom:8px}
 .icon-card h3{margin:0 0 4px;font-size:14px;font-weight:600}
 .icon-card p{margin:0;font-size:11px;color:var(--muted);line-height:1.3}
-.log{font-family:ui-monospace,Menlo,Consolas,monospace;background:#fafbff;color:var(--text);border:2px solid #e3e6ef;border-radius:8px;padding:12px;overflow:auto;font-size:11px;line-height:1.5;flex:1;min-height:0}
+.log{font-family:ui-monospace,Menlo,Consolas,monospace;background:#fafbff;color:var(--text);border:2px solid #e3e6ef;border-radius:8px;padding:12px;overflow-y:scroll;font-size:11px;line-height:1.5;flex:1;min-height:200px;max-height:100%}
+.log::-webkit-scrollbar{width:12px}
+.log::-webkit-scrollbar-track{background:#e3e6ef;border-radius:4px}
+.log::-webkit-scrollbar-thumb{background:#999;border-radius:4px}
+.log::-webkit-scrollbar-thumb:hover{background:#666}
 .log-line{margin:1px 0}
 .log-line.out{color:#10b981}
 .log-line.err{color:#ef4444}
+.helpbox{margin-top:10px;padding:10px 12px;border:2px solid #e3e6ef;border-radius:8px;background:#fafbff;font-size:11px;color:#444}
+.helpbox code{background:#fff;border:1px solid #e3e6ef;border-radius:4px;padding:0 4px}
 .divider{height:1px;background:#e3e6ef;margin:12px 0}
 .notice{background:#fef3c7;border:2px solid #fbbf24;border-radius:8px;padding:10px 12px;font-size:12px;color:#92400e;margin-bottom:12px}
 .network-item{display:flex;justify-content:space-between;align-items:center;padding:12px;background:#fafbff;border-bottom:1px solid #e3e6ef;transition:all .2s;cursor:pointer}
@@ -147,10 +156,13 @@ select.input{cursor:pointer}
             <div class="divider"></div>
             <div class="btn-group" style="margin-bottom:8px">
               <button id="btnRefresh" class="btn primary">🔄 Refresh from Ableton</button>
-              <button id="btnTestOSC" class="btn secondary sm">🧪 Test OSC</button>
               <button id="btnReadTracks" class="btn secondary sm">Load Stored Tracks</button>
               <button id="btnSendAll" class="btn ghost sm">Update All Tracks</button>
               <button id="btnResetTracks" class="btn ghost sm">Clear All Tracks</button>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-left:8px;cursor:pointer">
+                <input type="checkbox" id="mirrorOSC" checked style="cursor:pointer"/>
+                Also send to Ableton (OSC)
+              </label>
             </div>
           </div>
         </div>
@@ -159,7 +171,7 @@ select.input{cursor:pointer}
 
       <!-- Right Column - Serial Monitor -->
       <div class="right-col">
-        <div class="card flex">
+        <div class="card flex serial-card">
           <div class="hdr">
             <h1>📟 Serial Monitor</h1>
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-left:auto;cursor:pointer">
@@ -170,8 +182,17 @@ select.input{cursor:pointer}
           <div class="body flex">
             <div id="log" class="log"></div>
             <div style="margin-top:10px;display:flex;gap:8px">
-              <input id="cmd" class="input" placeholder="Send command..." style="flex:1;font-size:12px;padding:6px 8px"/>
+              <input id="cmd" class="input" placeholder="Send command..." style="flex:1;font-size:12px;padding:6px 8px" autocomplete="off"/>
               <button id="btnSend" class="btn ghost sm">Send</button>
+            </div>
+            <div class="helpbox">
+              <div style="font-weight:600;margin-bottom:6px">Commands quick reference</div>
+              <div>VERSION - request version</div>
+              <div>REBOOT - reboot device</div>
+              <div style="margin-top:12px;font-weight:600">Ableton Messages over OSC</div>
+              <div><code>/reannounce</code></div>
+              <div><code>/hello</code></div>
+              <div><code>/trackname index "Name" actualTrack</code> - Example: <code>/trackname 0 "Kick" 0</code></div>
             </div>
           </div>
         </div>
@@ -260,6 +281,23 @@ select.input{cursor:pointer}
 <script>
 const $ = s => document.querySelector(s);
 const logEl = $('#log');
+let autoScrollEnabled = true;
+const autoScrollCb = $('#autoScroll');
+if (autoScrollCb) {
+  autoScrollEnabled = !!autoScrollCb.checked;
+  autoScrollCb.addEventListener('change', (e) => {
+    autoScrollEnabled = !!e.target.checked;
+    if (autoScrollEnabled && logEl) {
+      requestAnimationFrame(() => { logEl.scrollTop = logEl.scrollHeight; });
+    }
+  });
+}
+// Periodically ensure we stay pinned to bottom when enabled
+setInterval(() => {
+  if (autoScrollEnabled && logEl) {
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+}, 500);
 let connectedDevices = new Map();
 let currentDevice = null;
 let deviceCounter = 0;
@@ -325,10 +363,10 @@ function log(msg, type = 'info') {
   line.textContent = msg;
   logEl.appendChild(line);
   
-  // Only auto-scroll if checkbox is checked
-  const autoScroll = $('#autoScroll');
-  if (autoScroll && autoScroll.checked) {
+  // Auto-scroll if enabled; do it after layout to ensure it sticks
+  if (autoScrollEnabled) {
     logEl.scrollTop = logEl.scrollHeight;
+    requestAnimationFrame(() => { logEl.scrollTop = logEl.scrollHeight; });
   }
 }
 
@@ -353,9 +391,14 @@ function updateConnectionStatus(connected) {
 // ----- Device Management -----
 async function scanDevices() {
   try {
+    console.log('[scanDevices] Fetching /api/ports...');
     const res = await fetch('/api/ports');
+    console.log(`[scanDevices] Response status: ${res.status}`);
     if (!res.ok) throw new Error(`Server error: ${res.status}`);
-    const ports = await res.json();
+    const rawResponse = await res.text();
+    console.log('[scanDevices] Raw response:', rawResponse);
+    const ports = JSON.parse(rawResponse);
+    console.log('[scanDevices] Parsed ports:', ports);
     const list = $('#deviceList');
     list.innerHTML = '';
     
@@ -390,138 +433,72 @@ async function scanDevices() {
       ? `<div class="device-status">✓ Connected via USB${trackInfo}</div>` 
       : `<div style="font-size:11px;color:#6b7280;margin-top:2px">⚪ Disconnected</div>`;
     
-    // Update footer with serial number if connected
-    if (isConnected && p.serialNumber) {
-      updateFooterSerial(p.serialNumber);
-    }
-    
-    // Device ID selector - check deviceIdMap first, then connectedDevices
-    let selectedDeviceId = null;
-    if (p.serialNumber && deviceIdMap.has(p.serialNumber)) {
-      selectedDeviceId = deviceIdMap.get(p.serialNumber);
-    } else if (deviceInfo) {
-      selectedDeviceId = deviceInfo.deviceId;
-    }
-    
-    const deviceIdSelector = `
-      <select class="input" style="width:80px;font-size:11px;padding:4px 6px;margin-right:8px" data-path="${p.path}">
-        <option value="0" ${selectedDeviceId === 0 ? 'selected' : ''}>1-8</option>
-        <option value="1" ${selectedDeviceId === 1 ? 'selected' : ''}>9-16</option>
-        <option value="2" ${selectedDeviceId === 2 ? 'selected' : ''}>17-24</option>
-        <option value="3" ${selectedDeviceId === 3 ? 'selected' : ''}>25-32</option>
-      </select>
-    `;
+    // Create device item HTML
+    const deviceIdOptions = [0, 1, 2, 3].map(id => 
+      `<option value="${id}">Tracks ${id * 8 + 1}-${(id + 1) * 8}</option>`
+    ).join('');
     
     item.innerHTML = `
-      <div style="display:flex;align-items:center;gap:8px;flex:1">
-        <div style="cursor:move;color:#9ca3af;font-size:16px" title="Drag to reorder">⋮⋮</div>
-        <div style="flex:1">
+      <div style="display:flex;align-items:center;gap:12px;flex:1">
+        <div>
           <div class="device-name">${displayName}${versionBadge}</div>
           ${statusText}
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:8px">
-        ${deviceIdSelector}
-        <button class="btn sm ${isConnected ? 'ghost active' : 'primary'}" data-path="${p.path}" data-name="${deviceName}">
-          ${isConnected ? 'Connected' : 'Connect'}
-        </button>
+        ${!isConnected ? 
+          `<select class="input sm" style="width:140px;font-size:11px;padding:4px 6px" data-path="${p.path}">
+            ${deviceIdOptions}
+          </select>` : ''
+        }
+        ${isConnected ? 
+          `<button class="btn ghost sm" onclick="disconnect('${p.path}')">Disconnect</button>` :
+          `<button class="btn primary sm" onclick="connect('${p.path}', '${deviceName}', '${p.serialNumber || ''}')">Connect</button>`
+        }
       </div>
     `;
     
-    const btn = item.querySelector('button');
-    btn.onclick = () => isConnected ? disconnect(p.path) : connect(p.path, deviceName, p.serialNumber);
-    
-    // Add event handler for device ID selector
-    const selector = item.querySelector('select');
-    selector.onchange = (e) => {
-      const newDeviceId = parseInt(e.target.value);
-      const path = e.target.dataset.path;
-      
-      // Update the device ID mapping
-      if (p.serialNumber) {
-        deviceIdMap.set(p.serialNumber, newDeviceId);
-        log(`📝 Manually set Device ID ${newDeviceId} for ${p.serialNumber}`, 'info');
-      }
-      
-      // If device is connected, send DEVICE_ID command and update
-      if (connectedDevices.has(path)) {
-        const trackRange = `${newDeviceId * 8 + 1}-${(newDeviceId + 1) * 8}`;
-        const deviceInfo = connectedDevices.get(path);
-        const oldDeviceId = deviceInfo.deviceId;
-        deviceInfo.deviceId = newDeviceId;
-        deviceInfo.trackRange = trackRange;
-        
-        // Send DEVICE_ID command to the specific device by path
-        console.log(`[DROPDOWN] Sending DEVICE_ID ${newDeviceId} to path: ${path}`);
-        fetch('/api/send-command', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ 
-            command: `DEVICE_ID ${newDeviceId}`,
-            path: path  // Specify which device to send to
-          })
-        }).then(res => res.json()).then(data => {
-          if (!data.ok) {
-            console.error('[DROPDOWN] Failed to send command:', data.error);
-          }
-        });
-        
-        log(`✓ Updated ${displayName} to Device ID ${newDeviceId} - Tracks ${trackRange}`, 'out');
-        scanDevices();
-        buildTrackGrid();
-        
-        // Send track names for the new device ID range
-        setTimeout(async () => {
-          await sendTrackNamesForDevice(newDeviceId);
-        }, 500);
+    // Add click handler for device item
+    item.onclick = (e) => {
+      if (e.target.tagName !== 'BUTTON') {
+        if (!isConnected) {
+          connect(p.path, deviceName, p.serialNumber || '');
+        }
       }
     };
     
     list.appendChild(item);
+    
+    // Update footer with serial number if connected
+    if (isConnected && p.serialNumber) {
+      updateFooterSerial(p.serialNumber);
+    }
+    
+    // Device ID selector - priority: saved by serial -> connected info -> auto by list order
+    let selectedDeviceId = null;
+    if (p.serialNumber && deviceIdMap.has(p.serialNumber)) {
+      selectedDeviceId = deviceIdMap.get(p.serialNumber);
+    } else if (deviceInfo) {
+      selectedDeviceId = deviceInfo.deviceId;
+    } else {
+      // Auto-assign next available ID (0-3)
+      const usedIds = new Set(Array.from(deviceIdMap.values()));
+      let deviceId = 0;
+      while (usedIds.has(deviceId) && deviceId < 4) {
+        deviceId++;
+      }
+      if (p.serialNumber) {
+        deviceIdMap.set(p.serialNumber, deviceId);
+        log(`🆕 Auto-assigned Device ID ${deviceId} to serial ${p.serialNumber}`, 'info');
+      }
+    }
+    
   });
   
-  // Populate alternate COM port dropdown with ALL ports
-  populateAlternateCOMPorts();
-  
+  // end of scanDevices list rendering
   } catch (err) {
-    console.error('Device scan error:', err);
-    const list = $('#deviceList');
-    list.innerHTML = `<div style="text-align:center;padding:12px;color:#ef4444;font-size:12px">⚠️ Scan failed: ${err.message}<br><small>Try clicking Refresh or check console logs.</small></div>`;
-  }
-}
-
-// Populate alternate COM port dropdown with ALL available ports (unfiltered)
-async function populateAlternateCOMPorts() {
-  try {
-    const res = await fetch('/api/ports/all');
-    if (!res.ok) throw new Error(`Server error: ${res.status}`);
-    const allPorts = await res.json();
-    
-    const comSelect = $('#comPortSelect');
-    if (comSelect) {
-      comSelect.innerHTML = '<option value="">Select COM port...</option>';
-      allPorts.forEach(p => {
-        const option = document.createElement('option');
-        option.value = p.path;
-        const isConnected = connectedDevices.has(p.path);
-        // Show full label with manufacturer info
-        option.textContent = p.label || p.path;
-        if (isConnected) {
-          option.style.backgroundColor = '#d1fae5';
-          option.style.color = '#10b981';
-          option.style.fontWeight = '600';
-          option.selected = true;
-        }
-        comSelect.appendChild(option);
-      });
-      // Update select background if connected
-      if (currentDevice) {
-        comSelect.style.backgroundColor = '#d1fae5';
-      }
-      console.log(`✓ Populated alternate COM dropdown with ${allPorts.length} ports`);
-    }
-  } catch (err) {
-    console.error('Alternate COM port scan error:', err);
+    log(`✗ Error scanning devices: ${err.message}`, 'err');
+    console.error('Scan error:', err);
   }
 }
 
@@ -659,9 +636,15 @@ function buildTrackGrid() {
   const host = $('#tracks');
   host.innerHTML = '';
   // Show 8 fields per connected device, default to 8 if none connected
-  let numDevices = connectedDevices && connectedDevices.size ? connectedDevices.size : 1;
+  let numDevices = connectedDevices && connectedDevices.size > 0 ? connectedDevices.size : 1;
   let totalTracks = Math.min(numDevices * 8, 32);
   for (let globalIdx = 0; globalIdx < totalTracks; globalIdx++) {
+    // Insert visual separators between groups of 8 (1-8 | 9-16 | 17-24 | 25-32)
+    if (globalIdx > 0 && globalIdx % 8 === 0) {
+      const sep = document.createElement('div');
+      sep.className = 'track-sep';
+      host.appendChild(sep);
+    }
     const row = document.createElement('div');
     row.className = 'trackrow';
     const label = document.createElement('label');
@@ -670,7 +653,7 @@ function buildTrackGrid() {
     input.className = 'input';
     input.id = 'tname' + globalIdx;
     input.name = `track-${globalIdx}`;
-    input.value = '';
+    input.value = String(globalIdx + 1);
     input.placeholder = `${globalIdx + 1}`;
     input.oninput = () => saveLocalTrackNames();
     row.appendChild(label);
@@ -729,7 +712,7 @@ function resetTracks() {
   for (let i = 0; i < totalTracks; i++) {
     const inputElement = document.getElementById('tname' + i);
     if (inputElement) {
-      inputElement.value = '';  // Clear to empty
+      inputElement.value = String(i + 1);  // Set to numeric default
     }
   }
   
@@ -821,33 +804,92 @@ async function sendTrackNamesForDevice(deviceId) {
 }
 
 async function sendAllTracks() {
+  console.log('[DEBUG] sendAllTracks called');
+  console.log('[DEBUG] currentDevice:', currentDevice);
+  console.log('[DEBUG] connectedDevices.size:', connectedDevices.size);
+  console.log('[DEBUG] connectedDevices:', Array.from(connectedDevices.entries()));
+  
+  // Check if any device is connected
+  if (!currentDevice && connectedDevices.size === 0) {
+    log('✗ Please connect to a TDS-8 device first', 'err');
+    log('Click "Connect" button on a device in the TDS-8 Devices section above', 'info');
+    return;
+  }
+
+  log('📤 Sending track names to connected devices...', 'info');
+  
   const trackToDevice = new Map();
   connectedDevices.forEach((deviceInfo, path) => {
+    console.log('[DEBUG] Processing device:', path, deviceInfo);
     const deviceId = deviceInfo.deviceId;
     const startTrack = deviceId * 8;
     const endTrack = startTrack + 8;
+    console.log(`[DEBUG] Device ${deviceId}: tracks ${startTrack}-${endTrack-1}`);
     for (let t = startTrack; t < endTrack; t++) {
       trackToDevice.set(t, { deviceId, localIndex: t - startTrack });
     }
   });
+
+  // Fallback for single-device mode when map hasn't been populated yet
+  if (trackToDevice.size === 0 && currentDevice) {
+    console.log('[DEBUG] Fallback: assuming single device with Device ID 0');
+    for (let t = 0; t < 8; t++) {
+      trackToDevice.set(t, { deviceId: 0, localIndex: t });
+    }
+  }
+  
+  console.log('[DEBUG] trackToDevice map:', Array.from(trackToDevice.entries()));
+  
   let count = 0;
   for (let i = 0; i < 32; i++) {
     const inputElement = document.getElementById('tname' + i);
     const name = inputElement ? inputElement.value.trim() : '';
+    if (name) {
+      console.log(`[DEBUG] Track ${i} has name: "${name}", has mapping: ${trackToDevice.has(i)}`);
+    }
     if (name && trackToDevice.has(i)) {
       const { deviceId, localIndex } = trackToDevice.get(i);
       const payload = { index: localIndex, name, actualTrack: i };
-      await fetch('/api/trackname', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      });
-      count++;
+      console.log(`[DEBUG] Sending track ${i}:`, payload);
+      try {
+        const res = await fetch('/api/trackname', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+          const error = await res.json();
+          log(`✗ Failed to send track ${i}: ${error.error || 'Unknown error'}`, 'err');
+        } else {
+          count++;
+          console.log(`[DEBUG] Successfully sent track ${i}`);
+          // Optionally mirror to Ableton (OSC) if enabled
+          const mirror = document.getElementById('mirrorOSC');
+          if (mirror && mirror.checked) {
+            try {
+              await fetch('/api/osc-send', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ address: '/trackname', args: [localIndex, name, i] })
+              });
+            } catch (e) {
+              console.warn('OSC mirror failed:', e);
+            }
+          }
+        }
+      } catch (err) {
+        log(`✗ Error sending track ${i}: ${err.message}`, 'err');
+        console.error('[DEBUG] Error:', err);
+      }
       await new Promise(r => setTimeout(r, 20));
     }
   }
   saveLocalTrackNames();
-  log(`✓ Updated ${count} track names to connected devices`, 'out');
+  if (count > 0) {
+    log(`✓ Updated ${count} track names to connected devices`, 'out');
+  } else {
+    log('⚠️ No track names were sent (fields may be empty or no devices connected)', 'info');
+  }
 }
 
 // ----- Modals -----
@@ -1415,7 +1457,8 @@ window.addEventListener('DOMContentLoaded', () => {
   log('TDS-8 Control ready', 'info');
   
   buildTrackGrid();
-  scanDevices();
+  loadLocalTrackNames();
+  scanDevices(); // Scan for devices on page load
   setInterval(scanDevices, 5000);
   checkDeviceStatus();
 
@@ -1431,9 +1474,6 @@ window.addEventListener('DOMContentLoaded', () => {
 
   const btnRefresh = document.getElementById('btnRefresh');
   if (btnRefresh) btnRefresh.onclick = refreshFromAbleton;
-
-  const btnTestOSC = document.getElementById('btnTestOSC');
-  if (btnTestOSC) btnTestOSC.onclick = testOSC;
 
   const btnSendAll = document.getElementById('btnSendAll');
   if (btnSendAll) btnSendAll.onclick = sendAllTracks;

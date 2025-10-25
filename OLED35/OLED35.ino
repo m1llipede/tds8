@@ -66,6 +66,7 @@ AppState currentState = STATE_STARTUP_SPLASH;
 unsigned long stateTransitionTime = 0;
 
 // =======================  Graphics / Bitmaps  ==============
+void tcaSelect(uint8_t i); // forward declaration
 // Show TDS-8 and Playoptix logo splash on all screens for 3 seconds
 void showLogosSplash() {
   for (uint8_t i = 0; i < 8; ++i) {

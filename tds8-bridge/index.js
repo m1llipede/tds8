@@ -233,6 +233,12 @@ function initOSCListener() {
                 
                 // Forward OSC commands to device via serial
                 if (oscMsg.address === "/trackname" && oscMsg.args.length >= 2) {
+                    // If no serial connection is open yet, ignore quietly to avoid spam on boot
+                    const serialReady = (serial && serial.isOpen) || (devices && devices.length > 0);
+                    if (!serialReady) {
+                        // Silently ignore to prevent console spam on boot before devices are connected
+                        return;
+                    }
                     const displayIndex = oscMsg.args[0].value;
                     const nameRaw = oscMsg.args[1].value;
                     const actualTrack = oscMsg.args.length >= 3 ? oscMsg.args[2].value : displayIndex;
@@ -240,20 +246,22 @@ function initOSCListener() {
                     const esc = String(nameRaw).replace(/"/g, '\\"');
                     
                     // Multi-device: Route to correct device based on track number
-                    if (devices.length > 0) {
-                        // Calculate which device this track belongs to
-                        const deviceId = Math.floor(actualTrack / 8);
-                        const localIndex = actualTrack % 8;
-                        
-                        if (deviceId < devices.length) {
+                    if (devices.length > 1) {
+                        console.log(`🔍 [ROUTING] Looking for deviceId=${deviceId} for track ${actualTrack}`);
+                        const targetDevice = devices.find(d => d.deviceID === deviceId || d.id === deviceId);
+                        if (targetDevice) {
                             const cmd = `/trackname ${localIndex} "${esc}" ${actualTrack}\n`;
                             sendToDevice(deviceId, cmd);
                             console.log(`📍 Routed track ${actualTrack} to Device ${deviceId}, local index ${localIndex}`);
                         }
                     } else {
                         // Single device mode (legacy)
-                        const cmd = `/trackname ${displayIndex} "${esc}" ${actualTrack}\n`;
-                        send(cmd);
+                        if (serial && serial.isOpen) {
+                            const cmd = `/trackname ${displayIndex} "${esc}" ${actualTrack}\n`;
+                            send(cmd);
+                        } else {
+                            // Silently ignore if the single-device serial port isn't open
+                        }
                     }
 
                     // Store the UNESCAPED name for UI/API (not the escaped version)
@@ -526,13 +534,15 @@ function onSerialDataMulti(device, chunk) {
 function onSerialData(chunk) {
   const text = chunk.toString('utf8');
   serialBuf += text;
-  wsBroadcast({ type: 'serial-data', data: text });
   let idx;
   while ((idx = serialBuf.indexOf('\n')) >= 0) {
     const line = serialBuf.slice(0, idx).trim();
     serialBuf = serialBuf.slice(idx + 1);
-    if (line) {
-      console.log(`RECV: ${line}`);
+    const trimmedLine = line.trim();
+    if (trimmedLine) {
+      // Only broadcast clean lines, not raw buffer data
+      wsBroadcast({ type: 'serial-data', data: `Received: ${trimmedLine}` });
+      console.log(`RECV: ${trimmedLine}`);
     }
     const m = /^VERSION\s*[:=]\s*([\w.\-]+)/i.exec(line);
     if (m) { deviceVersion = m[1]; wsBroadcast({ type: 'device-version', version: deviceVersion }); }
@@ -625,44 +635,38 @@ app.get('/api/ports/all', async (_req, res) => {
   // On Windows, get detailed port info from PowerShell
   if (process.platform === 'win32') {
     try {
-      await new Promise((resolve) => {
-        const cmd = 'powershell -NoProfile -Command "try { Get-CimInstance Win32_SerialPort | Select-Object DeviceID, Name, Description | ConvertTo-Json } catch { try { Get-WmiObject Win32_SerialPort | Select-Object DeviceID, Name, Description | ConvertTo-Json } catch {} }"';
-        exec(cmd, { windowsHide: true }, (err, stdout) => {
-          if (!err && stdout) {
-            console.log('PowerShell COM port raw output:', stdout);
-            try {
-              const psData = JSON.parse(stdout);
-              const psArray = Array.isArray(psData) ? psData : [psData];
-              console.log('Parsed PowerShell data:', psArray);
-              psArray.forEach(item => {
-                if (item.DeviceID) {
-                  console.log(`Mapping ${item.DeviceID} -> ${item.Name}`);
-                  psPortInfo.set(item.DeviceID, {
-                    name: item.Name || '',
-                    description: item.Description || ''
-                  });
-                  // Add to ports list if not already there
-                  if (!ports.some(p => p.path === item.DeviceID)) {
-                    ports.push({
-                      path: item.DeviceID,
-                      manufacturer: item.Name || item.Description || '',
-                      pnpId: item.Description || ''
-                    });
-                  }
-                }
-              });
-            } catch (e) {
-              console.log('PowerShell JSON parse error:', e.message);
-              console.log('Raw stdout was:', stdout);
-            }
-          } else {
-            console.log('PowerShell command failed or returned no output');
+      const discoveredPorts = await new Promise((resolve) => {
+        const cmd = 'powershell -NoProfile -Command "Get-WmiObject Win32_SerialPort | Select-Object DeviceID, Name, Description | ConvertTo-Json"';
+        exec(cmd, { windowsHide: true, timeout: 5000 }, (err, stdout) => {
+          if (err || !stdout) {
+            console.log('PowerShell command failed or returned no output. Using basic list.');
+            return resolve([]); // Resolve with empty array on error
           }
-          resolve();
+          try {
+            const psData = JSON.parse(stdout.trim());
+            const psArray = Array.isArray(psData) ? psData : [psData];
+            resolve(psArray.filter(p => p.DeviceID)); // Filter out invalid entries
+          } catch (e) {
+            console.log('PowerShell JSON parse error:', e.message);
+            resolve([]); // Resolve with empty array on parse error
+          }
         });
       });
+
+      // Add discovered ports to the main list if they aren't already there
+      discoveredPorts.forEach(psPort => {
+        psPortInfo.set(psPort.DeviceID, { name: psPort.Name, description: psPort.Description });
+        if (!ports.some(p => p.path === psPort.DeviceID)) {
+          ports.push({
+            path: psPort.DeviceID,
+            manufacturer: psPort.Name || psPort.Description || '',
+            pnpId: psPort.Description || ''
+          });
+        }
+      });
+
     } catch (e) {
-      console.log('PowerShell COM discovery skipped:', e.message);
+      console.log('PowerShell COM discovery completely failed:', e.message);
     }
   }
   
@@ -736,83 +740,64 @@ app.post('/api/connect', async (req, res) => {
       console.log(`🆕 Assigning Device ID ${deviceId} to ${desired} (new port)`);
     }
     
-    // For first device, use legacy single-device mode but add to devices array
-    if (devices.length === 0) {
-      const p = await openSerial(desired);
-      
-      // Reset deviceIP to localhost for wired connection
+    // Use consistent multi-device pattern for all devices (including first)
+    const newSerial = new SerialPortStream({ binding: Bindings, path: desired, baudRate: BAUD });
+    
+    const device = {
+      id: deviceId,
+      serial: newSerial,
+      path: desired,
+      buffer: '',
+      version: null,
+      deviceID: deviceId
+    };
+    
+    devices.push(device);
+    
+    console.log(`📊 [DEVICES] Array after connection:`, devices.map(d => `[ID=${d.deviceID}, path=${d.path}]`).join(', '));
+    
+    // Set up data handler for this device
+    newSerial.on('data', (chunk) => onSerialDataMulti(device, chunk));
+    newSerial.on('error', e => {
+      console.error(`❌ Device ${deviceId} error:`, e.message);
+      wsBroadcast({ type: 'serial-error', deviceId, message: e.message });
+    });
+    newSerial.on('close', () => {
+      console.log(`🔌 Device ${deviceId} disconnected: ${desired}`);
+      wsBroadcast({ type: 'serial-close', deviceId, path: desired });
+      // Remove from devices array
+      const index = devices.findIndex(d => d.id === deviceId);
+      if (index !== -1) devices.splice(index, 1);
+    });
+    
+    // For first device, also set legacy global variables for backward compatibility
+    if (devices.length === 1) {
+      serial = newSerial;
+      serialPath = desired;
+      serialBuf = device.buffer;
       deviceIP = '127.0.0.1';
-      
-      // Add first device to devices array for routing
-      const device = {
-        id: deviceId,
-        serial: serial,
-        path: p,
-        buffer: serialBuf,
-        version: deviceVersion,
-        deviceID: deviceId
-      };
-      devices.push(device);
-      
-      console.log(`📊 [DEVICES] Array after connection:`, devices.map(d => `[ID=${d.deviceID}, path=${d.path}]`).join(', '));
-      
-      // Send DEVICE_ID to first device
-      setTimeout(() => {
-        send(`DEVICE_ID ${deviceId}\n`);
-        console.log(`✓ Connected: ${p} → Device ID ${deviceId} (Tracks ${deviceId * 8 + 1}-${(deviceId + 1) * 8})`);
-      }, 500);
-      
-      // Broadcast device status to UI (wired mode)
-      // Force wired mode since we're connecting via serial
-      deviceIP = '127.0.0.1';
-      wsBroadcast({
-        type: 'device-mode',
-        mode: 'wired',
-        ip: '127.0.0.1'
-      });
       
       // Broadcast IP update to M4L
       setTimeout(() => broadcastIPUpdate(), 500);
-      res.json({ ok: true, path: p, baud: BAUD, deviceId });
-    } else {
-      // For additional devices, use multi-device mode
-      const newSerial = new SerialPortStream({ binding: Bindings, path: desired, baudRate: BAUD });
-      
-      const device = {
-        id: deviceId,
-        serial: newSerial,
-        path: desired,
-        buffer: '',
-        version: null,
-        deviceID: deviceId
-      };
-      
-      devices.push(device);
-      
-      console.log(`📊 [DEVICES] Array after connection:`, devices.map(d => `[ID=${d.deviceID}, path=${d.path}]`).join(', '));
-      
-      // Set up data handler for this device
-      newSerial.on('data', (chunk) => onSerialDataMulti(device, chunk));
-      
-      // Send DEVICE_ID command to set track offset
-      setTimeout(() => {
-        sendToDevice(deviceId, `DEVICE_ID ${deviceId}\n`);
-        sendToDevice(deviceId, 'VERSION\n');
-        console.log(`✓ Connected: ${desired} → Device ID ${deviceId} (Tracks ${deviceId * 8 + 1}-${(deviceId + 1) * 8})`);
-      }, 1000);
-      
-      // Broadcast device status to UI (wired mode for additional devices)
-      // Force wired mode since we're connecting via serial
-      deviceIP = '127.0.0.1';
-      wsBroadcast({
-        type: 'device-mode',
-        mode: 'wired',
-        ip: '127.0.0.1'
-      });
-      
-      wsBroadcast({ type: 'serial-open', path: desired, baud: BAUD });
-      res.json({ ok: true, path: desired, baud: BAUD, deviceId });
     }
+    
+    // Send DEVICE_ID command to set track offset
+    setTimeout(() => {
+      sendToDevice(deviceId, `DEVICE_ID ${deviceId}\n`);
+      sendToDevice(deviceId, 'VERSION\n');
+      console.log(`✓ Connected: ${desired} → Device ID ${deviceId} (Tracks ${deviceId * 8 + 1}-${(deviceId + 1) * 8})`);
+    }, 1000);
+    
+    // Broadcast device status to UI (wired mode)
+    deviceIP = '127.0.0.1';
+    wsBroadcast({
+      type: 'device-mode',
+      mode: 'wired',
+      ip: '127.0.0.1'
+    });
+    
+    wsBroadcast({ type: 'serial-open', path: desired, baud: BAUD });
+    res.json({ ok: true, path: desired, baud: BAUD, deviceId });
   } catch (e) { 
     console.error('Connection error:', e);
     res.status(500).json({ error: e.message }); 
