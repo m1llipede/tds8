@@ -425,10 +425,11 @@ async function scanDevices() {
     
     // Get device ID and track range if connected
     const deviceInfo = connectedDevices.get(p.path);
+    const deviceIdLabel = deviceInfo ? `Device ${deviceInfo.deviceId + 1}` : '';
     const trackInfo = deviceInfo ? ` - Tracks ${deviceInfo.trackRange}` : '';
     
     const statusText = isConnected 
-      ? `<div class="device-status">✓ Connected via USB${trackInfo}</div>` 
+      ? `<div class="device-status">✓ Connected via USB - ${deviceIdLabel}${trackInfo}</div>` 
       : `<div style="font-size:11px;color:#6b7280;margin-top:2px">⚪ Disconnected</div>`;
     
     // Create device item HTML

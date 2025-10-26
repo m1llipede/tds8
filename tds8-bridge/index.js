@@ -489,13 +489,25 @@ function send(s) {
 
 // Multi-device: Send to specific device by ID
 function sendToDevice(deviceId, s) {
+  console.log(`🔍 [sendToDevice] Attempting to send to deviceId=${deviceId}`);
+  console.log(`🔍 [sendToDevice] Current devices array:`, devices.map(d => `[id=${d.id}, path=${d.path}, serial=${d.serial ? 'open' : 'null'}]`).join(', '));
+  
   const device = devices.find(d => d.id === deviceId);
-  if (!device || !device.serial || !device.serial.isOpen) {
-    console.error(`❌ Cannot send to device ${deviceId} - Not connected`);
-    throw new Error(`Device ${deviceId} not connected`);
+  if (!device) {
+    console.error(`❌ Device with id=${deviceId} not found in devices array`);
+    throw new Error(`Device ${deviceId} not found`);
   }
+  if (!device.serial) {
+    console.error(`❌ Device ${deviceId} has no serial object`);
+    throw new Error(`Device ${deviceId} has no serial connection`);
+  }
+  if (!device.serial.isOpen) {
+    console.error(`❌ Device ${deviceId} serial port is not open`);
+    throw new Error(`Device ${deviceId} serial port closed`);
+  }
+  
   device.serial.write(s);
-  console.log(`SENT to Device ${deviceId}: ${s.trim()}`);
+  console.log(`✅ SENT to Device ${deviceId} (${device.path}): ${s.trim()}`);
 }
 
 // Multi-device: Send to all connected devices
@@ -1172,21 +1184,93 @@ app.post('/api/send', (req, res) => {
         const { cmd } = req.body;
         if (!cmd) throw new Error('Missing cmd');
 
-        const upperCmd = cmd.toUpperCase();
-        const broadcastCommands = ['VERSION', 'REBOOT'];
-
-        if (broadcastCommands.includes(upperCmd)) {
-            console.log(`📢 Broadcasting command to all devices: ${cmd}`);
-            sendToAll(cmd + '\n');
-            res.json({ ok: true, message: `Command sent to all devices.` });
-        } else {
-            // Default to sending to the first device for other commands
-            if (devices.length > 0) {
-                sendToDevice(devices[0].id, cmd + '\n');
-                res.json({ ok: true, message: `Command sent to device ${devices[0].id}.` });
-            } else {
-                throw new Error('No devices connected to send command.');
+        const upperCmd = cmd.toUpperCase().trim();
+        
+        // Handle VERSION commands
+        if (upperCmd.startsWith('VERSION')) {
+            const parts = upperCmd.split(/\s+/);
+            
+            // VERSION or VERSION ALL → query all devices
+            if (parts.length === 1 || (parts.length === 2 && parts[1] === 'ALL')) {
+                if (devices.length === 0) {
+                    throw new Error('No devices connected');
+                }
+                console.log(`📢 Broadcasting VERSION to all ${devices.length} devices`);
+                sendToAll('VERSION\n');
+                return res.json({ ok: true, message: `VERSION sent to all ${devices.length} devices` });
             }
+            
+            // VERSION <number> → query specific device
+            if (parts.length === 2) {
+                const deviceNum = parseInt(parts[1]);
+                if (isNaN(deviceNum)) {
+                    throw new Error(`Invalid device number: ${parts[1]}`);
+                }
+                
+                // Device numbers are 1-indexed for user (Device 1, Device 2, etc.)
+                // But device IDs are 0-indexed internally (ID 0, ID 1, etc.)
+                const deviceId = deviceNum - 1;
+                
+                const targetDevice = devices.find(d => d.id === deviceId);
+                if (!targetDevice) {
+                    throw new Error(`Device ${deviceNum} not found or not connected`);
+                }
+                
+                console.log(`📋 Requesting VERSION from Device ${deviceNum} (ID: ${deviceId})`);
+                sendToDevice(deviceId, 'VERSION\n');
+                return res.json({ ok: true, message: `VERSION request sent to Device ${deviceNum}` });
+            }
+            
+            throw new Error('Invalid VERSION syntax. Use: VERSION, VERSION ALL, or VERSION <number>');
+        }
+        
+        // Handle REBOOT commands
+        if (upperCmd.startsWith('REBOOT')) {
+            const parts = upperCmd.split(/\s+/);
+            
+            // REBOOT or REBOOT ALL → reboot all devices
+            if (parts.length === 1 || (parts.length === 2 && parts[1] === 'ALL')) {
+                if (devices.length === 0) {
+                    throw new Error('No devices connected to reboot');
+                }
+                console.log(`📢 Rebooting all ${devices.length} devices`);
+                sendToAll('REBOOT\n');
+                return res.json({ ok: true, message: `Reboot command sent to all ${devices.length} devices` });
+            }
+            
+            // REBOOT <number> → reboot specific device
+            if (parts.length === 2) {
+                const deviceNum = parseInt(parts[1]);
+                if (isNaN(deviceNum)) {
+                    throw new Error(`Invalid device number: ${parts[1]}`);
+                }
+                
+                // Device numbers are 1-indexed for user (Device 1, Device 2, etc.)
+                // But device IDs are 0-indexed internally (ID 0, ID 1, etc.)
+                const deviceId = deviceNum - 1;
+                
+                console.log(`🔍 [DEBUG] Looking for Device ${deviceNum} (deviceId=${deviceId})`);
+                console.log(`🔍 [DEBUG] Available devices:`, devices.map(d => `[id=${d.id}, path=${d.path}]`).join(', '));
+                
+                const targetDevice = devices.find(d => d.id === deviceId);
+                if (!targetDevice) {
+                    throw new Error(`Device ${deviceNum} not found or not connected. Available devices: ${devices.map(d => `Device ${d.id + 1}`).join(', ')}`);
+                }
+                
+                console.log(`🔄 Rebooting Device ${deviceNum} (ID: ${deviceId}) on path: ${targetDevice.path}`);
+                sendToDevice(deviceId, 'REBOOT\n');
+                return res.json({ ok: true, message: `Reboot command sent to Device ${deviceNum}` });
+            }
+            
+            throw new Error('Invalid REBOOT syntax. Use: REBOOT, REBOOT ALL, or REBOOT <number>');
+        }
+        
+        // Other commands: send to first device as default
+        if (devices.length > 0) {
+            sendToDevice(devices[0].id, cmd + '\n');
+            res.json({ ok: true, message: `Command sent to device ${devices[0].id}.` });
+        } else {
+            throw new Error('No devices connected to send command.');
         }
     } catch (e) {
         res.status(400).json({ error: e.message });
@@ -1369,6 +1453,88 @@ wss.on('connection', ws => {
   ws.send(JSON.stringify({ type: 'hello', port: serialPath, baud: BAUD }));
 });
 
+// Auto-connect to all TDS-8 devices
+async function autoConnectDevices() {
+  try {
+    const ports = await listPorts();
+    const tds8Ports = ports.filter(p => {
+      const mfg = (p.manufacturer || '').toLowerCase();
+      const desc = (p.pnpId || '').toLowerCase();
+      const vendor = (p.vendorId || '').toLowerCase();
+      const product = (p.productId || '').toLowerCase();
+      
+      // XIAO ESP32-C3 uses CP2102N USB-to-UART bridge
+      // VID: 10C4 (Silicon Labs), PID: EA60 (CP210x)
+      const isCP2102 = vendor === '10c4' && product === 'ea60';
+      const hasCP210x = mfg.includes('silicon labs') || desc.includes('cp210');
+      
+      return isCP2102 || hasCP210x;
+    });
+    
+    console.log(`🔍 Found ${tds8Ports.length} potential TDS-8 device(s)`);
+    
+    for (const port of tds8Ports) {
+      // Check if already connected
+      const alreadyConnected = devices.find(d => d.path === port.path);
+      if (alreadyConnected) {
+        console.log(`⏭️  ${port.path} already connected as Device ${alreadyConnected.id + 1}`);
+        continue;
+      }
+      
+      // Auto-assign device ID
+      const usedIds = new Set(devices.map(d => d.id));
+      let deviceId = 0;
+      for (let i = 0; i < MAX_DEVICES; i++) {
+        if (!usedIds.has(i)) {
+          deviceId = i;
+          break;
+        }
+      }
+      
+      console.log(`🔌 Auto-connecting ${port.path} as Device ${deviceId + 1}...`);
+      
+      try {
+        portToDeviceId.set(port.path, deviceId);
+        const newSerial = new SerialPortStream({ binding: Bindings, path: port.path, baudRate: BAUD });
+        
+        const device = {
+          id: deviceId,
+          serial: newSerial,
+          path: port.path,
+          buffer: '',
+          version: null,
+          deviceID: deviceId
+        };
+        
+        devices.push(device);
+        
+        newSerial.on('data', (chunk) => onSerialDataMulti(device, chunk));
+        newSerial.on('error', e => {
+          console.error(`❌ Device ${deviceId} error:`, e.message);
+        });
+        newSerial.on('close', () => {
+          console.log(`🔌 Device ${deviceId} disconnected: ${port.path}`);
+          const index = devices.findIndex(d => d.id === deviceId);
+          if (index !== -1) devices.splice(index, 1);
+        });
+        
+        // Send DEVICE_ID and VERSION commands
+        setTimeout(() => {
+          sendToDevice(deviceId, `DEVICE_ID ${deviceId}\n`);
+          sendToDevice(deviceId, 'VERSION\n');
+          console.log(`✅ Auto-connected: ${port.path} → Device ${deviceId + 1} (Tracks ${deviceId * 8 + 1}-${(deviceId + 1) * 8})`);
+          wsBroadcast({ type: 'device-connected', deviceId, path: port.path, trackRange: `${deviceId * 8 + 1}-${(deviceId + 1) * 8}` });
+        }, 1000);
+        
+      } catch (err) {
+        console.error(`❌ Failed to auto-connect ${port.path}:`, err.message);
+      }
+    }
+  } catch (err) {
+    console.error('❌ Auto-connect failed:', err.message);
+  }
+}
+
 server.listen(PORT, () => {
   console.log('\n========================================================');
   console.log('         TDS-8 Bridge - Port Configuration');
@@ -1381,4 +1547,10 @@ server.listen(PORT, () => {
   console.log(`  M4L should send OSC to: 127.0.0.1:${OSC_LISTEN_PORT}`);
   console.log(`  M4L should listen on:   port ${M4L_PORT}`);
   console.log('========================================================\n');
+  
+  // Auto-connect to devices on startup
+  setTimeout(autoConnectDevices, 2000);
+  
+  // Check for new devices every 5 seconds
+  setInterval(autoConnectDevices, 5000);
 });

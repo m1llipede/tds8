@@ -43,7 +43,7 @@
 #include <WiFiClientSecure.h>
 
 // =======================  Firmware  =======================
-#define FW_VERSION "0.352"   // ← bump this when you publish a new firmware
+#define FW_VERSION "0.363"   // ← bump this when you publish a new firmware
 #define FW_BUILD "2025.10.21-multi-device"  // ← build identifier (date + feature)
 #define GITHUB_MANIFEST_URL "https://raw.githubusercontent.com/m1llipede/tds8/main/manifest.json"
 
@@ -336,6 +336,7 @@ void setup() {
   loadTrackNames();
   // Load saved wired mode preference (defaults to true if never set)
   loadWiredMode();
+  Serial.printf("Loaded mode: %s\n", wiredOnly ? "WIRED" : "WIFI");
   // Load saved device ID (defaults to 0 if never set)
   loadDeviceID();
   
@@ -343,6 +344,33 @@ void setup() {
   int offset = deviceID * 8;
   for (int i = 0; i < numScreens; i++) {
     actualTrackNumbers[i] = offset + i;
+  }
+  
+  // CRITICAL FIX: Clear track names if they contain generic "Track X" that doesn't match current device ID
+  bool needsClear = false;
+  Serial.printf("DEBUG: Checking track names for deviceID=%d (expected tracks %d-%d)\n", deviceID, offset + 1, offset + 8);
+  for (int i = 0; i < numScreens; i++) {
+    Serial.printf("DEBUG: Screen %d: trackNames='%s', expectedTrack=%d\n", i, trackNames[i].c_str(), offset + i + 1);
+    if (trackNames[i].startsWith("Track ")) {
+      int storedTrack = trackNames[i].substring(6).toInt();
+      int expectedTrack = offset + i + 1;
+      if (storedTrack != expectedTrack) {
+        Serial.printf("DEBUG: Mismatch found - storedTrack=%d != expectedTrack=%d\n", storedTrack, expectedTrack);
+        needsClear = true;
+        break;
+      }
+    }
+  }
+  
+  if (needsClear) {
+    Serial.println("DEBUG: Clearing mismatched track names for device ID change");
+    for (int i = 0; i < numScreens; i++) {
+      trackNames[i] = "";
+      Serial.printf("DEBUG: Cleared trackNames[%d] to ''\n", i);
+    }
+    saveTrackNames();
+  } else {
+    Serial.println("DEBUG: No track name clearing needed");
   }
   
   // Send mode status - if WiFi mode and already connected, include IP
@@ -358,7 +386,7 @@ void setup() {
   Serial.printf("DEVICE_ID: %d\n", deviceID);
   
   // Kick off the non-blocking startup sequence
-  showStartupSplash(); // This now only draws the logos, non-blockingly
+  showStartupSplash(); // Draw the logos
   
   // ========== WIRED MODE (DEFAULT) ==========
   if (wiredOnly) {
@@ -367,33 +395,36 @@ void setup() {
     
     WiFi.mode(WIFI_OFF);  // Explicitly turn off WiFi
     
-    // In wired mode, skip instructions and go straight to running
-    currentState = STATE_RUNNING;
+    // Show splash for 2 seconds, then transition to running
+    currentState = STATE_STARTUP_SPLASH;
+    stateTransitionTime = millis() + 2000; // Hold splash for 2 seconds
     
-    // Clear splash and show blank track displays
-    refreshAll();
     Serial.println("🚀 Wired mode active - ready for serial commands");
     
     // No HTTP server, no OSC, no WiFi - just serial
-    // Ready for serial commands
+    // State machine in loop() will handle transition to running after 2 seconds
     return;  // Skip all WiFi setup
   }
   
-  // WiFi mode: show splash then instructions
-  currentState = STATE_STARTUP_SPLASH;
-  stateTransitionTime = millis() + 3000; // Hold splash for 3 seconds
+  // WiFi mode: Start WiFi setup immediately, THEN show splash for 2 seconds
   // ========== WIFI MODE ==========
   
   WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
   WiFi.persistent(true);
 
-  // Try to connect with saved creds
+  // Try to connect with saved creds (non-blocking start)
   if (wifiSSID.length()) WiFi.begin(wifiSSID.c_str(), wifiPW.c_str());
   else                   WiFi.begin();
 
+  // Show "Connecting to WiFi..." screen while WiFi attempts to connect
+  showWiFiConnecting();
+  
+  // Wait up to 5 seconds for WiFi connection (with visual feedback)
   unsigned long t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 12000) delay(250);
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 5000) {
+    delay(250);
+  }
 
   // If not connected -> setup or rescue
   if (WiFi.status() != WL_CONNECTED) {
@@ -406,8 +437,13 @@ void setup() {
     if (haveSaved) {
       Serial.println("⏳ Retrying STA join with saved creds…");
       WiFi.begin(wifiSSID.c_str(), wifiPW.c_str());
+      
+      // Show "Retrying..." screen during retry
+      showWiFiRetrying();
+      
+      // Wait up to 5 seconds for retry
       unsigned long t1 = millis();
-      while (WiFi.status() != WL_CONNECTED && millis() - t1 < 20000UL) delay(250);
+      while (WiFi.status() != WL_CONNECTED && millis() - t1 < 5000UL) delay(250);
 
       if (WiFi.status() != WL_CONNECTED) {
         showNetworkSetup();
@@ -433,7 +469,7 @@ void setup() {
   // Connected?
   if (WiFi.status() == WL_CONNECTED) {
     // WiFi connected
-    showWiFiConnected(WiFi.localIP().toString());
+    showNetworkSplash(WiFi.localIP().toString());
     startRescueAP();  // Keep rescue AP for a window
   } else {
     // WiFi not connected
@@ -474,38 +510,19 @@ void setup() {
   if (WiFi.status() == WL_CONNECTED) {
     showQuickStartLoop();
   }
+  
+  // NOW set splash screen timer AFTER WiFi setup is complete
+  currentState = STATE_STARTUP_SPLASH;
+  stateTransitionTime = millis() + 2000; // Hold splash for 2 seconds
 }
 
 // =========================  LOOP  =========================
 static String serialBuffer = "";
 
 void loop() {
-  // ================== STATE MACHINE FOR STARTUP SEQUENCE ==================
-  switch (currentState) {
-    case STATE_STARTUP_SPLASH:
-      if (millis() >= stateTransitionTime) {
-        Serial.println("⏱️ Splash screen complete. Showing logos for 3s...");
-        showLogosSplash();
-        stateTransitionTime = millis() + 3000; // Hold logos for 3 seconds
-        currentState = STATE_INSTRUCTIONS;
-      }
-      return; // Do nothing else during splash
-
-    case STATE_INSTRUCTIONS:
-      if (millis() >= stateTransitionTime) {
-        Serial.println("✅ Logo splash complete. Switching to track displays.");
-        refreshAll(); // Show blank track names now
-        currentState = STATE_RUNNING;
-      }
-      return; // Do nothing else during instructions
-
-    case STATE_RUNNING:
-      break; // Fall through to normal operation
-  }
-
-  // ================== NORMAL OPERATION (after startup) ==================
-  
-  // ========== SERIAL COMMAND HANDLER (WORKS IN BOTH MODES) ==========
+  // ========== SERIAL COMMAND HANDLER (ALWAYS ACTIVE, EVEN DURING SPLASH) ==========
+  // CRITICAL: Process serial commands BEFORE state machine so DEVICE_ID commands
+  // are received immediately, even during the 2-second splash screen
   static String serialBuffer = "";
   while (Serial.available() > 0) {
     char c = (char)Serial.read();
@@ -519,6 +536,17 @@ void loop() {
       serialBuffer += c;
       if (serialBuffer.length() > 512) serialBuffer.remove(0, 1);
     }
+  }
+
+  // ================== STATE MACHINE FOR STARTUP SEQUENCE ==================
+  // Check if splash screen time has elapsed and transition to running state
+  if (currentState == STATE_STARTUP_SPLASH) {
+    if (millis() >= stateTransitionTime) {
+      Serial.println("✅ Splash screen complete. Switching to track displays.");
+      refreshAll(); // Show track displays with current track names
+      currentState = STATE_RUNNING;
+    }
+    // Continue processing below - don't return early!
   }
 
   // ========== WIFI MODE ONLY: Handle server, OSC, etc. ==========
@@ -738,8 +766,8 @@ void drawTrackName(uint8_t screen, const String& name) {
 }
 
 void refreshAll() {
-  for (uint8_t i = 0; i < numScreens; i++) drawTrackName(i, "");
-} // Show blank center, only bottom track number, until names are set
+  for (uint8_t i = 0; i < numScreens; i++) drawTrackName(i, trackNames[i]);
+} // Redraw all screens with their current track names
 
 void drawCentered(const String& s, uint8_t textSize, int y) {
   display.setTextSize(textSize);
@@ -770,20 +798,6 @@ void showNetworkSetup() {
     display.drawRect(0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1, SSD1306_WHITE);
     display.display();
   }
-}
-
-void showWiFiConnected(const String& ip) {
-  for (uint8_t i = 0; i < numScreens; i++) {
-    tcaSelect(i);
-    display.invertDisplay(false);
-    display.clearDisplay();
-    display.drawRect(0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1, SSD1306_WHITE);
-    drawLines(2, 10, "WiFi", "Connected!", "");
-    drawCentered("IP: " + ip, 1, 48);
-    display.display();
-  }
-  delay(3000);
-  refreshAll();
 }
 
 void showNetworkSplash(const String& ip) {
@@ -840,20 +854,40 @@ void showAbletonConnectedAll(uint16_t ms) {
   refreshAll();
 }
 
-// NEW: Show a temporary alert message on all screens
-void showAlertAll(const String& message, uint16_t ms) {
-  for (uint8_t i = 0; i < numScreens; i++) {
-    tcaSelect(i);
-    display.invertDisplay(false);
-    display.clearDisplay();
-    display.drawRect(0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1, SSD1306_WHITE);
-    drawCentered(message, 2, 24);
-    display.display();
-  }
-  if (ms > 0) {
-    delay(ms);
-    refreshAll(); // Restore track names
-  }
+void showWiFiConnecting() {
+  // Show "Connecting to WiFi..." on OLED 1
+  tcaSelect(0);
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  
+  // Center the text
+  String text = "Connecting to WiFi...";
+  int16_t x1, y1;
+  uint16_t w, h;
+  display.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+  display.setCursor((SCREEN_WIDTH - w) / 2, (SCREEN_HEIGHT - h) / 2);
+  display.println(text);
+  
+  display.display();
+}
+
+void showWiFiRetrying() {
+  // Show "Retrying WiFi..." on OLED 1
+  tcaSelect(0);
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  
+  // Center the text
+  String text = "Retrying WiFi...";
+  int16_t x1, y1;
+  uint16_t w, h;
+  display.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+  display.setCursor((SCREEN_WIDTH - w) / 2, (SCREEN_HEIGHT - h) / 2);
+  display.println(text);
+  
+  display.display();
 }
 
 void showQuickStartLoop() {
@@ -1659,8 +1693,13 @@ void handleSerialLine(const String& line) {
 
   // VERSION
   if (head == "version") {
+    int trackStart = deviceID * 8 + 1;
+    int trackEnd = (deviceID + 1) * 8;
     Serial.printf("VERSION: %s\n", FW_VERSION);
     Serial.printf("BUILD: %s\n", FW_BUILD);
+    Serial.printf("DEVICE_ID: %d\n", deviceID);
+    Serial.printf("TRACKS: %d-%d\n", trackStart, trackEnd);
+    Serial.printf("MODE: %s\n", wiredOnly ? "WIRED" : "WIFI");
     return;
   }
 
@@ -1669,6 +1708,8 @@ void handleSerialLine(const String& line) {
     String arg = (sp >= 0) ? cmd.substring(sp + 1) : "";
     arg.trim();
     int newID = arg.toInt();
+    
+    Serial.printf("DEBUG: Received DEVICE_ID command with newID=%d, current deviceID=%d\n", newID, deviceID);
     
     if (newID < 0 || newID > 3) {
       Serial.println("ERR: DEVICE_ID must be 0-3");
@@ -1679,7 +1720,16 @@ void handleSerialLine(const String& line) {
       return;
     }
     
-    // Always update track numbers and refresh display, even if ID hasn't changed
+    // If device ID is changing, clear all stored track names
+    if (newID != deviceID) {
+      Serial.printf("Device ID changing from %d to %d - clearing track names\n", deviceID, newID);
+      for (int i = 0; i < numScreens; i++) {
+        trackNames[i] = "";
+      }
+      saveTrackNames();
+    }
+    
+    // Update device ID
     deviceID = newID;
     saveDeviceID();
     
@@ -1689,11 +1739,12 @@ void handleSerialLine(const String& line) {
       actualTrackNumbers[i] = offset + i;
     }
     
-    // Force device to running state to synchronize with other devices
-    // This ensures all devices show the same screen (track displays) in multi-device setups
-    currentState = STATE_RUNNING;
+    // If already in running state, refresh display immediately
+    // If still in splash state, let it complete naturally - display will refresh when splash ends
+    if (currentState == STATE_RUNNING) {
+      refreshAll();
+    }
     
-    refreshAll();
     Serial.printf("OK: DEVICE_ID set to %d (tracks %d-%d)\n", deviceID, offset + 1, offset + 8);
     return;
   }
@@ -1764,20 +1815,6 @@ void handleSerialLine(const String& line) {
     delay(500);
     ESP.restart();
     return;
-  }
-
-  // ALERT "message" <duration>
-  if (line.startsWith("ALERT ")) {
-    int firstQuote = line.indexOf('"');
-    int lastQuote = line.lastIndexOf('"');
-    if (firstQuote != -1 && lastQuote > firstQuote) {
-      String msg = line.substring(firstQuote + 1, lastQuote);
-      String durationStr = line.substring(lastQuote + 1);
-      durationStr.trim();
-      int duration = durationStr.toInt();
-      if (duration <= 0) duration = 1000; // Default to 1 sec
-      showAlertAll(msg, duration);
-    }
   }
 
   // /trackname <idx> "name" [actualTrack]
@@ -1885,11 +1922,23 @@ void handleSerialLine(const String& line) {
     return;
   }
 
+  // CLEAR_TRACKS
+  if (head == "clear_tracks") {
+    for (int i = 0; i < numScreens; i++) {
+      trackNames[i] = "";
+    }
+    saveTrackNames();
+    refreshAll();
+    Serial.println("OK: All track names cleared");
+    return;
+  }
+
   // Unknown command
   Serial.println("ERR: Unknown command");
   Serial.println("📋 Available commands:");
   Serial.println("   VERSION - Show firmware version");
   Serial.println("   DEVICE_ID 0-3 - Set device ID for multi-device setups");
+  Serial.println("   CLEAR_TRACKS - Clear all stored track names");
   Serial.println("   WIRED_ONLY true/false - Toggle wired/WiFi mode");
   Serial.println("   WIFI_JOIN \"ssid\" \"password\" - Save WiFi credentials");
   Serial.println("   FORGET - Clear WiFi credentials");
