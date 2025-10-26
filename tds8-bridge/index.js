@@ -976,21 +976,24 @@ app.post('/api/wifi-join', (req, res) => {
     const esc = s => '"' + String(s).replace(/"/g, '\\"') + '"';
     const cmd = `WIFI_JOIN ${esc(ssid)} ${esc(password || '')}`;
     
-    // Send to specific device if deviceId provided, otherwise first device
-    if (deviceId !== undefined && devices.length > 0) {
-      const device = devices.find(d => d.deviceID === deviceId || d.id === deviceId);
-      if (device) {
-        sendToDevice(device.id, cmd + '\n');
-        console.log(`📡 Sent WiFi join to Device ${deviceId}`);
-      } else {
-        throw new Error(`Device ${deviceId} not found`);
-      }
+    // Send WiFi credentials to ALL connected devices
+    if (devices.length > 0) {
+      console.log(`📡 Sending WiFi join to all ${devices.length} devices`);
+      sendToAll(cmd + '\n');
+      
+      // Also send WIRED_ONLY false to all devices to enable WiFi mode
+      console.log(`📡 Sending WIRED_ONLY false to all ${devices.length} devices`);
+      sendToAll('WIRED_ONLY false\n');
+      
+      // Then reboot all devices to apply WiFi mode
+      console.log(`📡 Rebooting all ${devices.length} devices to apply WiFi settings`);
+      sendToAll('REBOOT\n');
     } else if (serial && serial.isOpen) {
       send(cmd + '\n');
-    } else if (devices.length === 0) {
-      throw new Error('No device connected - please connect a TDS-8 first');
+      send('WIRED_ONLY false\n');
+      send('REBOOT\n');
     } else {
-      throw new Error('Serial port not available - device may be disconnecting');
+      throw new Error('No devices connected - please connect TDS-8 devices first');
     }
     
     res.json({ ok: true });
@@ -1481,20 +1484,28 @@ async function autoConnectDevices() {
         continue;
       }
       
-      // Auto-assign device ID
-      const usedIds = new Set(devices.map(d => d.id));
-      let deviceId = 0;
-      for (let i = 0; i < MAX_DEVICES; i++) {
-        if (!usedIds.has(i)) {
-          deviceId = i;
-          break;
+      // Determine device ID: check port mapping first, then assign next available
+      let deviceId;
+      if (portToDeviceId.has(port.path)) {
+        // This port has been used before - restore its ID
+        deviceId = portToDeviceId.get(port.path);
+        console.log(`📌 Auto-connect restoring Device ID ${deviceId} for ${port.path} (previously assigned)`);
+      } else {
+        // New port - assign next available ID (0-3)
+        const usedIds = new Set(Array.from(portToDeviceId.values()));
+        for (let i = 0; i < MAX_DEVICES; i++) {
+          if (!usedIds.has(i)) {
+            deviceId = i;
+            break;
+          }
         }
+        portToDeviceId.set(port.path, deviceId);
+        console.log(`🆕 Auto-connect assigning new Device ID ${deviceId} to ${port.path}`);
       }
       
       console.log(`🔌 Auto-connecting ${port.path} as Device ${deviceId + 1}...`);
       
       try {
-        portToDeviceId.set(port.path, deviceId);
         const newSerial = new SerialPortStream({ binding: Bindings, path: port.path, baudRate: BAUD });
         
         const device = {
@@ -1518,12 +1529,20 @@ async function autoConnectDevices() {
           if (index !== -1) devices.splice(index, 1);
         });
         
-        // Send DEVICE_ID and VERSION commands
+        // Send DEVICE_ID and VERSION commands with retry
         setTimeout(() => {
           sendToDevice(deviceId, `DEVICE_ID ${deviceId}\n`);
           sendToDevice(deviceId, 'VERSION\n');
           console.log(`✅ Auto-connected: ${port.path} → Device ${deviceId + 1} (Tracks ${deviceId * 8 + 1}-${(deviceId + 1) * 8})`);
           wsBroadcast({ type: 'device-connected', deviceId, path: port.path, trackRange: `${deviceId * 8 + 1}-${(deviceId + 1) * 8}` });
+          
+          // Retry VERSION command if no response after 3 seconds
+          setTimeout(() => {
+            if (!devices.find(d => d.id === deviceId && d.version)) {
+              console.log(`🔄 Retrying VERSION for Device ${deviceId + 1} (no response yet)`);
+              sendToDevice(deviceId, 'VERSION\n');
+            }
+          }, 3000);
         }, 1000);
         
       } catch (err) {

@@ -85,7 +85,10 @@ select.input{cursor:pointer}
     <div id="connectionBanner" style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:12px 20px;margin-bottom:16px;border-radius:8px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,0.1)">
       <div style="display:flex;align-items:center;gap:16px">
         <div style="font-size:13px;font-weight:600;opacity:0.9">TDS-8 Connection:</div>
-        <div id="connectionType" style="font-size:14px;font-weight:700;padding:4px 12px;background:rgba(255,255,255,0.2);border-radius:4px;border:1px solid rgba(255,255,255,0.3)">Not Connected</div>
+        <select id="connectionTypeSelect" class="input" style="background:rgba(255,255,255,0.9);color:#333;border:none;padding:6px 12px;font-weight:600;width:120px">
+          <option value="wired">Wired (USB)</option>
+          <option value="wifi">WiFi</option>
+        </select>
       </div>
       <div style="display:flex;align-items:center;gap:12px">
         <div style="font-size:11px;opacity:0.8">IP Address:</div>
@@ -312,31 +315,30 @@ function updateConnectionBanner(type, ip) {
   currentConnectionType = type;
   currentConnectionIP = ip || '—';
   
-  const typeEl = $('#connectionType');
+  const typeSelect = $('#connectionTypeSelect');
   const ipEl = $('#connectionIP');
   const banner = $('#connectionBanner');
   
-  console.log(`🔍 Elements found: typeEl=${!!typeEl}, ipEl=${!!ipEl}, banner=${!!banner}`);
+  console.log(`🔍 Elements found: typeSelect=${!!typeSelect}, ipEl=${!!ipEl}, banner=${!!banner}`);
   
+  // Update dropdown selection
+  if (typeSelect) {
+    typeSelect.value = type || 'wired';
+  }
+  
+  // Update banner styling based on type
   if (type === 'wired') {
-    typeEl.textContent = '🔌 Wired (USB)';
-    typeEl.style.background = 'rgba(16,185,129,0.3)';
-    typeEl.style.border = '1px solid rgba(16,185,129,0.5)';
     banner.style.background = 'linear-gradient(135deg,#10b981 0%,#059669 100%)';
   } else if (type === 'wifi') {
-    typeEl.textContent = '📡 WiFi';
-    typeEl.style.background = 'rgba(59,130,246,0.3)';
-    typeEl.style.border = '1px solid rgba(59,130,246,0.5)';
     banner.style.background = 'linear-gradient(135deg,#3b82f6 0%,#2563eb 100%)';
   } else {
-    typeEl.textContent = '❌ Not Connected';
-    typeEl.style.background = 'rgba(239,68,68,0.3)';
-    typeEl.style.border = '1px solid rgba(239,68,68,0.5)';
     banner.style.background = 'linear-gradient(135deg,#6b7280 0%,#4b5563 100%)';
   }
   
-  ipEl.textContent = currentConnectionIP;
-  console.log(`✅ Banner updated: ${typeEl.textContent} - ${ipEl.textContent}`);
+  // Update IP address
+  if (ipEl) {
+    ipEl.textContent = ip || '—';
+  }
 }
 
 // Load saved networks from localStorage
@@ -429,7 +431,7 @@ async function scanDevices() {
     const trackInfo = deviceInfo ? ` - Tracks ${deviceInfo.trackRange}` : '';
     
     const statusText = isConnected 
-      ? `<div class="device-status">✓ Connected via USB - ${deviceIdLabel}${trackInfo}</div>` 
+      ? `<div class="device-status">✓ Connected via ${currentConnectionType === 'wifi' ? 'WiFi' : 'USB'} - ${deviceIdLabel}${trackInfo}</div>` 
       : `<div style="font-size:11px;color:#6b7280;margin-top:2px">⚪ Disconnected</div>`;
     
     // Create device item HTML
@@ -1485,6 +1487,48 @@ window.addEventListener('DOMContentLoaded', () => {
 
   const btnRefresh = document.getElementById('btnRefresh');
   if (btnRefresh) btnRefresh.onclick = refreshFromAbleton;
+
+  // Connection type dropdown handler
+  const connectionTypeSelect = document.getElementById('connectionTypeSelect');
+  if (connectionTypeSelect) {
+    connectionTypeSelect.onchange = async (e) => {
+      const newMode = e.target.value;
+      log(`🔄 Switching to ${newMode} mode...`, 'info');
+      
+      if (newMode === 'wired') {
+        // Send WIRED_ONLY true to all devices and reboot
+        try {
+          const response = await fetch('/api/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cmd: 'WIRED_ONLY true' })
+          });
+          const result = await response.json();
+          if (result.ok) {
+            log('✓ Sent wired mode command', 'out');
+            // Wait a moment then reboot
+            setTimeout(async () => {
+              await fetch('/api/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cmd: 'REBOOT ALL' })
+              });
+              log('🔄 Rebooting all devices to apply wired mode', 'info');
+            }, 1000);
+          }
+        } catch (err) {
+          log(`❌ Failed to switch to wired mode: ${err.message}`, 'error');
+        }
+      } else if (newMode === 'wifi') {
+        // Show WiFi network selection dialog
+        const wifiDialog = document.getElementById('wifiDialog');
+        if (wifiDialog) {
+          wifiDialog.style.display = 'block';
+          scanWifiNetworks();
+        }
+      }
+    };
+  }
 
   const btnSendAll = document.getElementById('btnSendAll');
   if (btnSendAll) btnSendAll.onclick = sendAllTracks;
