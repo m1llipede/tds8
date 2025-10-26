@@ -13,7 +13,7 @@ const { SerialPortStream } = require('@serialport/stream');
 const { autoDetect } = require('@serialport/bindings-cpp');
 
 const PORT = process.env.PORT || 8088;
-const OSC_LISTEN_PORT = parseInt(process.env.OSC_LISTEN_PORT || '8002', 10);  // Changed from 8000 to avoid conflicts
+const OSC_LISTEN_PORT = parseInt(process.env.OSC_LISTEN_PORT || '8003', 10);  // Changed to 8003 to avoid blocking
 const BAUD = parseInt(process.env.BAUD || '115200', 10);
 
 // Optional defaults (you can set these later)
@@ -50,7 +50,7 @@ function initOSC() {
             });
             
             udpPort.on("ready", () => {
-                console.log("📡 OSC Sender: Ready on port 9001 (sends to Ableton on 127.0.0.1:9000)");
+                console.log(`📡 OSC Sender: Ready on port 9001 (Bridge → M4L ${M4L_IP}:${M4L_PORT})`);
             });
             
             udpPort.on("error", (err) => {
@@ -197,6 +197,12 @@ function initOSCListener() {
                                 ssid: ssid,
                                 connectionType: newIP === '127.0.0.1' ? 'wired' : 'wifi'
                             });
+                            // Transparency log to UI when WiFi IP arrives
+                            if (newIP !== '127.0.0.1') {
+                              uiLog(`MODE: WIFI`);
+                              uiLog(`IP: ${newIP}`);
+                              uiLog(`OSC: Bridge listening ${OSC_LISTEN_PORT} (from M4L), sending ${M4L_PORT} (to M4L)`);
+                            }
                             
                             // Forward to M4L
                             broadcastIPUpdate();
@@ -447,6 +453,11 @@ function wsBroadcast(obj) {
   for (const c of wss.clients) if (c.readyState === 1) c.send(s);
 }
 
+// Helper: print a line to the Serial Monitor area in the web UI
+function uiLog(line) {
+  try { wsBroadcast({ type: 'serial-data', data: line }); } catch {}
+}
+
 // -------- Serial helpers --------
 async function listPorts() {
   try { return await Bindings.list(); }
@@ -580,6 +591,11 @@ function onSerialData(chunk) {
         mode: connectionType,
         ip: mode === 'WIRED' ? '127.0.0.1' : (deviceIP || 'Connecting...')
       });
+      // Transparency log to UI when mode line seen over serial
+      uiLog(`MODE: ${mode}`);
+      const ipNow = mode === 'WIRED' ? '127.0.0.1' : (deviceIP || 'pending…');
+      uiLog(`IP: ${ipNow}`);
+      uiLog(`OSC: Bridge listening ${OSC_LISTEN_PORT} (from M4L), sending ${M4L_PORT} (to M4L)`);
     }
   }
 }
@@ -1227,6 +1243,36 @@ app.post('/api/send', (req, res) => {
             throw new Error('Invalid VERSION syntax. Use: VERSION, VERSION ALL, or VERSION <number>');
         }
         
+        // Handle WIRED_ONLY <true|false> (always broadcast)
+        if (upperCmd.startsWith('WIRED_ONLY')) {
+            const parts = cmd.trim().split(/\s+/);
+            const arg = parts.length >= 2 ? parts[1] : undefined;
+            if (arg === undefined) {
+                throw new Error("Missing argument. Use: WIRED_ONLY true|false");
+            }
+            if (!/^(true|false)$/i.test(arg)) {
+                throw new Error("Invalid argument. Use: WIRED_ONLY true|false");
+            }
+            if (devices.length === 0) throw new Error('No devices connected');
+            console.log(`📢 Broadcasting WIRED_ONLY ${arg} to all ${devices.length} devices`);
+            sendToAll(`WIRED_ONLY ${arg}\n`);
+            // Transparency log to UI
+            const mode = /^true$/i.test(arg) ? 'WIRED' : 'WIFI';
+            const ip = mode === 'WIRED' ? '127.0.0.1' : (deviceIP || 'pending…');
+            uiLog(`MODE: ${mode}`);
+            uiLog(`IP: ${ip}`);
+            uiLog(`OSC: Bridge listening ${OSC_LISTEN_PORT} (from M4L), sending ${M4L_PORT} (to M4L)`);
+            return res.json({ ok: true, message: `WIRED_ONLY ${arg} sent to all devices` });
+        }
+
+        // Handle CLEAR_TRACKS (always broadcast)
+        if (upperCmd === 'CLEAR_TRACKS') {
+            if (devices.length === 0) throw new Error('No devices connected');
+            console.log(`📢 Broadcasting CLEAR_TRACKS to all ${devices.length} devices`);
+            sendToAll('CLEAR_TRACKS\n');
+            return res.json({ ok: true, message: 'CLEAR_TRACKS sent to all devices' });
+        }
+        
         // Handle REBOOT commands
         if (upperCmd.startsWith('REBOOT')) {
             const parts = upperCmd.split(/\s+/);
@@ -1268,7 +1314,7 @@ app.post('/api/send', (req, res) => {
             throw new Error('Invalid REBOOT syntax. Use: REBOOT, REBOOT ALL, or REBOOT <number>');
         }
         
-        // Other commands: send to first device as default
+        // Other commands: send to first device as default (explicit broadcast not defined)
         if (devices.length > 0) {
             sendToDevice(devices[0].id, cmd + '\n');
             res.json({ ok: true, message: `Command sent to device ${devices[0].id}.` });

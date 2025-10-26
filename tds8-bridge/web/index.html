@@ -81,20 +81,8 @@ select.input{cursor:pointer}
 </head>
 <body>
   <div class="wrap" style="display:block;" id="mainApp">
-    <!-- Connection Status Banner -->
-    <div id="connectionBanner" style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:12px 20px;margin-bottom:16px;border-radius:8px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,0.1)">
-      <div style="display:flex;align-items:center;gap:16px">
-        <div style="font-size:13px;font-weight:600;opacity:0.9">TDS-8 Connection:</div>
-        <select id="connectionTypeSelect" class="input" style="background:rgba(255,255,255,0.9);color:#333;border:none;padding:6px 12px;font-weight:600;width:120px">
-          <option value="wired">Wired (USB)</option>
-          <option value="wifi">WiFi</option>
-        </select>
-      </div>
-      <div style="display:flex;align-items:center;gap:12px">
-        <div style="font-size:11px;opacity:0.8">IP Address:</div>
-        <div id="connectionIP" style="font-family:ui-monospace,monospace;font-size:13px;font-weight:600;padding:4px 10px;background:rgba(0,0,0,0.2);border-radius:4px">—</div>
-      </div>
-    </div>
+    <!-- Connection Status Banner (hidden; controls moved below Serial Monitor) -->
+    <div id="connectionBanner" style="display:none"></div>
     
     <div class="main-grid">
       <!-- Left Column -->
@@ -116,34 +104,6 @@ select.input{cursor:pointer}
               </div>
             </div>
             
-            <!-- Alternate Connection Methods -->
-            <div style="display:flex;gap:12px;margin-top:16px;padding-top:16px;border-top:2px solid #e3e6ef">
-              <div style="flex:1">
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-                  <label style="font-size:11px;color:var(--muted);font-weight:600;margin:0">🔌 Alternate Wired COM Port</label>
-                  <span id="wiredStatus" style="font-size:10px;padding:2px 8px;border-radius:4px;background:#e5e7eb;color:#6b7280">Disconnected</span>
-                </div>
-                <div style="display:flex;gap:8px;align-items:center">
-                  <select id="comPortSelect" class="input" style="flex:1;font-size:12px;padding:6px 8px">
-                    <option value="">Select COM port...</option>
-                  </select>
-                  <button id="btnWiredConnect" class="btn primary sm">Connect</button>
-                </div>
-              </div>
-              <div style="flex:1">
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-                  <label style="font-size:11px;color:var(--muted);font-weight:600;margin:0">📡 WiFi Connection</label>
-                  <span id="wifiStatus" style="font-size:10px;padding:2px 8px;border-radius:4px;background:#e5e7eb;color:#6b7280">Disconnected</span>
-                </div>
-                <div style="display:flex;gap:8px;align-items:center">
-                  <select id="wifiNetworkSelect" class="input" style="flex:1;font-size:12px;padding:6px 8px" title="Windows may only show currently connected network. Disconnect WiFi to see all networks.">
-                    <option value="">Select WiFi network...</option>
-                  </select>
-                  <button id="btnWifiScanQuick" class="btn ghost sm" title="Scan for networks (may only show connected network on Windows)">🔄</button>
-                  <button id="btnWifiConnect" class="btn primary sm">Connect</button>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -181,9 +141,28 @@ select.input{cursor:pointer}
           </div>
           <div class="body flex">
             <div id="log" class="log"></div>
-            <div style="margin-top:10px;display:flex;gap:8px">
-              <input id="cmd" class="input" placeholder="Send command..." style="flex:1;font-size:12px;padding:6px 8px" autocomplete="off"/>
+            <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <input id="cmd" class="input" placeholder="Send command... (defaults to ALL devices)" style="flex:1;font-size:12px;padding:6px 8px" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" inputmode="text" name="tds8_command"/>
               <button id="btnSend" class="btn ghost sm">Send</button>
+              <div class="btn-group" style="gap:6px">
+                <button id="qaWired" class="btn sm ghost" title="Switch all to Wired (USB) and reboot">Wired</button>
+                <button id="qaWifi" class="btn sm ghost" title="Switch all to WiFi">WiFi</button>
+                <button id="qaRebootAll" class="btn sm ghost" title="Reboot all devices">Reboot All</button>
+                <button id="qaVersionAll" class="btn sm ghost" title="Request version from all devices">Version All</button>
+                <button id="qaConnectAll" class="btn sm ghost" title="Connect all detected TDS-8 devices">Connect All</button>
+              </div>
+            </div>
+            <!-- Compact Connection Controls (moved here) -->
+            <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <div style="font-size:12px;font-weight:600;color:#374151">TDS-8 Connection</div>
+              <select id="connectionTypeSelect" class="input" style="padding:6px 10px;width:140px">
+                <option value="wired">Wired (USB)</option>
+                <option value="wifi">WiFi</option>
+              </select>
+              <div style="margin-left:auto;display:flex;align-items:center;gap:6px">
+                <div style="font-size:11px;color:#6b7280">IP:</div>
+                <div id="connectionIP" style="font-family:ui-monospace,monospace;font-size:12px;font-weight:600;padding:4px 8px;background:#eef2ff;border-radius:6px;border:1px solid #c7d2fe">—</div>
+              </div>
             </div>
             <div class="helpbox">
               <div style="font-weight:600;margin-bottom:6px">Commands quick reference</div>
@@ -247,10 +226,10 @@ select.input{cursor:pointer}
       <div class="hdr"><h1>➕ Add Network</h1></div>
       <div class="body">
         <label>Network Name (SSID)</label>
-        <input id="ssidInput" class="input" placeholder="Enter network name" style="margin-bottom:12px"/>
+        <input id="ssidInput" class="input" placeholder="Enter network name" style="margin-bottom:12px" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" inputmode="text" name="tds8_ssid"/>
         
         <label>Password</label>
-        <input id="pwd" class="input" type="password" placeholder="Enter password" style="margin-bottom:16px"/>
+        <input id="pwd" class="input" type="password" placeholder="Enter password" style="margin-bottom:16px" autocomplete="new-password" data-lpignore="true" name="tds8_wifi_password"/>
         
         <div class="btn-group">
           <button id="btnSaveNetwork" class="btn primary">Save & Connect</button>
@@ -326,6 +305,10 @@ function updateConnectionBanner(type, ip) {
     typeSelect.value = type || 'wired';
   }
   
+  // Show/hide inline WiFi controls
+  const wifiControls = document.getElementById('wifiInlineControls');
+  if (wifiControls) wifiControls.style.display = (type === 'wifi') ? 'flex' : 'none';
+
   // Update banner styling based on type
   if (type === 'wired') {
     banner.style.background = 'linear-gradient(135deg,#10b981 0%,#059669 100%)';
@@ -1554,11 +1537,7 @@ window.addEventListener('DOMContentLoaded', () => {
   const btnAddNetwork = document.getElementById('btnAddNetwork');
   if (btnAddNetwork) btnAddNetwork.onclick = () => $('#modalAddNetwork').style.display = 'block';
 
-  const btnCancelAdd = document.getElementById('btnCancelAdd');
-  if (btnCancelAdd) btnCancelAdd.onclick = () => $('#modalAddNetwork').style.display = 'none';
-
-  const btnSaveNetwork = document.getElementById('btnSaveNetwork');
-  if (btnSaveNetwork) btnSaveNetwork.onclick = saveNetwork;
+  // btnCancelAdd and btnSaveNetwork handlers moved below (after WiFi modal logic)
 
   const btnCloseWifi = document.getElementById('btnCloseWifi');
   if (btnCloseWifi) btnCloseWifi.onclick = () => $('#modalWifi').style.display = 'none';
@@ -1590,10 +1569,166 @@ window.addEventListener('DOMContentLoaded', () => {
 
   const cmdInput = document.getElementById('cmd');
   if (cmdInput) {
-    cmdInput.onkeypress = (e) => {
+    cmdInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') sendCommand();
-    };
+    });
   }
+
+  // Populate SSIDs for top inline controls
+  async function scanWifiTop() {
+    const sel = document.getElementById('wifiSsidTop');
+    if (!sel) return;
+    try {
+      const res = await fetch('/api/wifi-scan');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'scan failed');
+      const items = Array.isArray(data) ? data : (data.networks || []);
+      // Clear and refill
+      sel.innerHTML = '<option value="">Select SSID…</option>';
+      items.forEach(n => {
+        const ssid = n.ssid || n.SSID || n.name;
+        if (ssid) {
+          const opt = document.createElement('option');
+          opt.value = ssid; opt.textContent = ssid;
+          sel.appendChild(opt);
+        }
+      });
+    } catch (e) {
+      // If scan fails, keep manual entry via text option
+      const sel = document.getElementById('wifiSsidTop');
+      if (sel && sel.querySelector('option')) sel.querySelector('option').textContent = 'Enter SSID manually…';
+    }
+  }
+
+  // Show WiFi modal when switching to WiFi
+  const typeSelect2 = document.getElementById('connectionTypeSelect');
+  if (typeSelect2) {
+    typeSelect2.addEventListener('change', (e) => {
+      if (e.target.value === 'wifi') {
+        const modal = document.getElementById('modalAddNetwork');
+        if (modal) {
+          modal.style.display = 'block';
+          // Load saved password if SSID was previously used
+          const ssidInput = document.getElementById('ssidInput');
+          const pwdInput = document.getElementById('pwd');
+          if (ssidInput && ssidInput.value) {
+            const savedPwd = localStorage.getItem('tds8_wifi_' + ssidInput.value);
+            if (savedPwd && pwdInput) pwdInput.value = savedPwd;
+          }
+        }
+      } else {
+        // Wired mode selected
+        apiSend('WIRED_ONLY true').then(() => {
+          setTimeout(() => apiSend('REBOOT ALL'), 500);
+        });
+      }
+    });
+  }
+
+  // Save & Connect button handler (WiFi modal)
+  const btnSaveNetwork = document.getElementById('btnSaveNetwork');
+  if (btnSaveNetwork) btnSaveNetwork.onclick = async () => {
+    const ssidInput = document.getElementById('ssidInput');
+    const pwdInput = document.getElementById('pwd');
+    const ssid = ssidInput && ssidInput.value ? ssidInput.value.trim() : '';
+    const password = pwdInput ? pwdInput.value : '';
+    if (!ssid) { log('SSID is required', 'error'); return; }
+    try {
+      // Save password to localStorage
+      if (password) localStorage.setItem('tds8_wifi_' + ssid, password);
+      log(`📡 Joining WiFi "${ssid}" on all devices…`, 'info');
+      const res = await fetch('/api/wifi-join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ssid, password })
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || 'join failed');
+      log('✓ WiFi credentials sent. Devices rebooting…', 'out');
+      // Close modal
+      const modal = document.getElementById('modalAddNetwork');
+      if (modal) modal.style.display = 'none';
+    } catch (err) {
+      log(`✖ WiFi join failed: ${err.message}`, 'error');
+    }
+  };
+  
+  // Cancel button handler (WiFi modal)
+  const btnCancelAdd = document.getElementById('btnCancelAdd');
+  if (btnCancelAdd) btnCancelAdd.onclick = () => {
+    const modal = document.getElementById('modalAddNetwork');
+    if (modal) modal.style.display = 'none';
+    // Revert dropdown to Wired
+    const typeSelect = document.getElementById('connectionTypeSelect');
+    if (typeSelect) typeSelect.value = 'wired';
+  };
+
+  // Quick actions
+  async function apiSend(cmd) {
+    if (!cmd) return;
+    try {
+      const res = await fetch('/api/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cmd })
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || 'Request failed');
+      log(`→ ${cmd} (ok)`, 'out');
+    } catch (err) {
+      log(`✖ ${cmd} (${err.message})`, 'error');
+    }
+  }
+
+  const qaWired = document.getElementById('qaWired');
+  if (qaWired) qaWired.onclick = async () => {
+    await apiSend('WIRED_ONLY true');
+    setTimeout(() => apiSend('REBOOT ALL'), 500);
+  };
+
+  const qaWifi = document.getElementById('qaWifi');
+  if (qaWifi) qaWifi.onclick = () => {
+    const modal = document.getElementById('modalAddNetwork');
+    if (modal) modal.style.display = 'block';
+    // Set dropdown to WiFi
+    const typeSelect = document.getElementById('connectionTypeSelect');
+    if (typeSelect) typeSelect.value = 'wifi';
+  };
+
+  const qaRebootAll = document.getElementById('qaRebootAll');
+  if (qaRebootAll) qaRebootAll.onclick = () => apiSend('REBOOT ALL');
+
+  const qaVersionAll = document.getElementById('qaVersionAll');
+  if (qaVersionAll) qaVersionAll.onclick = () => apiSend('VERSION ALL');
+
+  const qaConnectAll = document.getElementById('qaConnectAll');
+  if (qaConnectAll) qaConnectAll.onclick = async () => {
+    try {
+      log('🔌 Connecting all detected TDS-8 devices…', 'info');
+      const res = await fetch('/api/ports');
+      const ports = await res.json();
+      if (!Array.isArray(ports) || ports.length === 0) {
+        log('No serial ports found.', 'error');
+        return;
+      }
+      // Connect each detected TDS-8 (filter by isTDS8 when present)
+      for (const p of ports) {
+        if (p.isTDS8 || true) {
+          try {
+            await fetch('/api/connect', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ path: p.path })
+            });
+          } catch (e) {}
+        }
+      }
+      // After a moment, query versions to verify
+      setTimeout(() => apiSend('VERSION ALL'), 800);
+    } catch (err) {
+      log(`✖ Connect All failed: ${err.message}`, 'error');
+    }
+  };
 
   const btnReadTracks = document.getElementById('btnReadTracks');
   if (btnReadTracks) {

@@ -43,7 +43,7 @@
 #include <WiFiClientSecure.h>
 
 // =======================  Firmware  =======================
-#define FW_VERSION "0.364"   // ← bump this when you publish a new firmware
+#define FW_VERSION "0.365"   // ← bump this when you publish a new firmware
 #define FW_BUILD "2025.10.21-multi-device"  // ← build identifier (date + feature)
 #define GITHUB_MANIFEST_URL "https://raw.githubusercontent.com/m1llipede/tds8/main/manifest.json"
 
@@ -1473,14 +1473,15 @@ void broadcastIP() {
   IPAddress bcast(gw[0], gw[1], gw[2], 255);
   String s = WiFi.localIP().toString();
 
+  // Send plain text IP (legacy)
   Udp.beginPacket(bcast, ipBroadcastPort); Udp.print(s); Udp.endPacket();
 
-  // Send IP update directly to bridge at 127.0.0.1:9000
+  // Send OSC /ipupdate to LAN broadcast (bridge listens on 0.0.0.0:9000)
   OSCMessage m("/ipupdate");
   m.add(s.c_str());
-  Udp.beginPacket(IPAddress(127, 0, 0, 1), ipBroadcastPort); m.send(Udp); Udp.endPacket();
+  Udp.beginPacket(bcast, ipBroadcastPort); m.send(Udp); Udp.endPacket();
   delay(0);
-  Serial.printf("SENT: /ipupdate %s (to bridge at 127.0.0.1:9000)\n", s.c_str());
+  Serial.printf("SENT: /ipupdate %s\n", s.c_str());
 }
 
 // ======================  Forget Wi-Fi  =======================
