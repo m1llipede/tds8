@@ -932,26 +932,7 @@ app.post('/api/send-command', (req, res) => {
 
 app.post('/api/disconnect', async (req, res) => {
   try {
-    const { path } = req.body;
-    
-    if (path) {
-      // Multi-device: find and disconnect specific device
-      const device = devices.find(d => d.path === path);
-      if (device) {
-        console.log(`🔌 Disconnecting multi-device ${device.id}: ${path}`);
-        await new Promise((resolve, reject) => {
-          device.serial.close(err => {
-            if (err) reject(err);
-            else resolve();
-          });
-        });
-        // Device will be removed from devices array by the close event handler
-        res.json({ ok: true, message: `Device ${device.id + 1} disconnected` });
-      } else {
-        res.json({ ok: false, message: `Device at ${path} not found` });
-      }
-    } else if (serial && serial.isOpen) {
-      // Legacy single-device disconnect
+    if (serial && serial.isOpen) {
       await new Promise((resolve, reject) => {
         serial.close(err => {
           if (err) reject(err);
@@ -972,33 +953,29 @@ app.post('/api/disconnect', async (req, res) => {
   }
 });
 
-// OLD /api/send route - REMOVED (duplicate with multi-device version below)
+app.post('/api/send', (req, res) => {
+  try {
+    let cmd = (req.body && req.body.cmd) ? String(req.body.cmd) : '';
+    cmd = cmd.trim();
+    if (!cmd) throw new Error('Missing cmd');
+    send(cmd.endsWith('\n') ? cmd : cmd + '\n');
+    res.json({ ok: true });
+  } catch (e) { 
+    console.error(`Error:`, e.message);
+    res.status(400).json({ error: e.message }); 
+  }
+});
 
-// Communication toggle - updated for multi-device support
+// Communication toggle
 app.post('/api/comm-mode', (req, res) => {
   try {
     const mode = String((req.body && req.body.mode) || '').toLowerCase();
     if (!['wired','wifi'].includes(mode)) throw new Error('mode must be wired or wifi');
-    
     if (mode === 'wired') {
-      // Send WIRED_ONLY true to all devices
-      if (devices.length > 0) {
-        console.log(`📢 Broadcasting WIRED_ONLY true to all ${devices.length} devices`);
-        sendToAll('WIRED_ONLY true\n');
-      } else {
-        send('WIRED_ONLY true\n');
-      }
+      send('WIRED_ONLY true\n');
     } else { 
-      // Send WIRED_ONLY false to all devices
-      if (devices.length > 0) {
-        console.log(`📢 Broadcasting WIRED_ONLY false to all ${devices.length} devices`);
-        sendToAll('WIRED_ONLY false\n');
-        // Also send WIFI_ON to all devices
-        sendToAll('WIFI_ON\n');
-      } else {
-        send('WIRED_ONLY false\n');
-        send('WIFI_ON\n');
-      }
+      send('WIRED_ONLY false\n'); 
+      send('WIFI_ON\n'); 
     }
     res.json({ ok: true, mode });
   } catch (e) { 
@@ -1216,15 +1193,7 @@ app.post('/api/activetrack', (req, res) => {
   try {
     const { index } = req.body || {};
     if (index === undefined || `${index}`.trim() === '') throw new Error('Missing index');
-    
-    // Send to all connected devices (activetrack is typically broadcast)
-    if (devices.length > 0) {
-      console.log(`📢 Broadcasting ACTIVETRACK ${index} to all ${devices.length} devices`);
-      sendToAll(`/activetrack ${index}\n`);
-    } else {
-      send(`/activetrack ${index}\n`);
-    }
-    
+    send(`/activetrack ${index}\n`);
     res.json({ ok: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -1296,15 +1265,12 @@ app.post('/api/send', (req, res) => {
             return res.json({ ok: true, message: `WIRED_ONLY ${arg} sent to all devices` });
         }
 
-        // Handle /reannounce command (send OSC to M4L)
-        if (upperCmd === '/REANNOUNCE') {
-            console.log('📡 Sending /reannounce OSC to M4L');
-            try {
-                sendOSC('/reannounce', []);
-                return res.json({ ok: true, message: '/reannounce sent to M4L via OSC' });
-            } catch (err) {
-                return res.status(400).json({ error: `Failed to send /reannounce: ${err.message}` });
-            }
+        // Handle CLEAR_TRACKS (always broadcast)
+        if (upperCmd === 'CLEAR_TRACKS') {
+            if (devices.length === 0) throw new Error('No devices connected');
+            console.log(`📢 Broadcasting CLEAR_TRACKS to all ${devices.length} devices`);
+            sendToAll('CLEAR_TRACKS\n');
+            return res.json({ ok: true, message: 'CLEAR_TRACKS sent to all devices' });
         }
         
         // Handle REBOOT commands
@@ -1492,7 +1458,7 @@ app.get('/api/fw-feed', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-// Firmware — start OTA from a manifest - updated for multi-device support
+// Firmware — start OTA from a manifest
 app.post('/api/ota-update', async (req, res) => {
   try {
     const manifestUrl = (req.body && req.body.manifest) || OTA_MANIFEST_URL;
@@ -1500,19 +1466,9 @@ app.post('/api/ota-update', async (req, res) => {
     const mPath = await fetchToTemp(manifestUrl);
     const manifest = JSON.parse(await fs.promises.readFile(mPath, 'utf8'));
     if (!manifest.url) throw new Error('Manifest missing url');
-    
-    // Send OTA commands to all connected devices
-    if (devices.length > 0) {
-      console.log(`📡 Broadcasting OTA update to all ${devices.length} devices`);
-      sendToAll('WIRED_ONLY false\n');
-      sendToAll('WIFI_ON\n');
-      sendToAll(`OTA_URL ${manifest.url}\n`);
-    } else {
-      send('WIRED_ONLY false\n');
-      send('WIFI_ON\n');
-      send(`OTA_URL ${manifest.url}\n`);
-    }
-    
+    send('WIRED_ONLY false\n');
+    send('WIFI_ON\n');
+    send(`OTA_URL ${manifest.url}\n`);
     res.json({ ok: true, url: manifest.url });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });

@@ -145,8 +145,11 @@ select.input{cursor:pointer}
               <input id="cmd" class="input" placeholder="Send command... (defaults to ALL devices)" style="flex:1;font-size:12px;padding:6px 8px" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" inputmode="text" name="tds8_command"/>
               <button id="btnSend" class="btn ghost sm">Send</button>
               <div class="btn-group" style="gap:6px">
+                <button id="qaWired" class="btn sm ghost" title="Switch all to Wired (USB) and reboot">Wired</button>
+                <button id="qaWifi" class="btn sm ghost" title="Switch all to WiFi">WiFi</button>
                 <button id="qaRebootAll" class="btn sm ghost" title="Reboot all devices">Reboot All</button>
                 <button id="qaVersionAll" class="btn sm ghost" title="Request version from all devices">Version All</button>
+                <button id="qaConnectAll" class="btn sm ghost" title="Connect all detected TDS-8 devices">Connect All</button>
               </div>
             </div>
             <!-- Compact Connection Controls (moved here) -->
@@ -184,21 +187,46 @@ select.input{cursor:pointer}
     </div>
   </div>
 
-  <!-- Wi-Fi Modal (legacy - removed) -->
+  <!-- Wi-Fi Modal -->
+  <div id="modalWifi" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:1000;padding:20px;overflow:auto">
+    <div style="max-width:600px;margin:60px auto;background:white;border-radius:10px;overflow:hidden">
+      <div class="hdr"><h1>📡 Wi-Fi Settings</h1></div>
+      <div class="body" style="padding:0">
+        <div style="padding:16px">
+          <div class="notice">
+            ⚠️ Connecting to Wi-Fi will disable wired mode. Device will switch to wireless communication.
+          </div>
+          
+          <div style="margin-bottom:12px">
+            <label style="padding:0 0 8px 0">Add New Network</label>
+            <div style="font-size:12px;color:var(--muted);margin-bottom:12px">
+              <span style="color:#000;font-weight:600">MANUALLY ADD NETWORK</span> ... Or choose a network from the list below.
+            </div>
+          </div>
+        </div>
+        
+        <div id="networkList" style="max-height:300px;overflow-y:auto">
+          <!-- Networks will be inserted here -->
+        </div>
+        
+        <div style="padding:16px;border-top:1px solid #e3e6ef">
+          <div class="btn-group">
+            <button id="btnScanNetworks" class="btn secondary">Scan for Networks</button>
+            <button id="btnAddNetwork" class="btn primary">Add Network</button>
+            <button id="btnCloseWifi" class="btn ghost">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Add Network Modal -->
   <div id="modalAddNetwork" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:1001;padding:20px;overflow:auto">
     <div style="max-width:450px;margin:80px auto;background:white;border-radius:10px;overflow:hidden">
-      <div class="hdr"><h1>➕ Join WiFi Network</h1></div>
+      <div class="hdr"><h1>➕ Add Network</h1></div>
       <div class="body">
         <label>Network Name (SSID)</label>
-        <div style="display:flex;gap:8px;margin-bottom:12px">
-          <select id="ssidDropdown" class="input" style="flex:1;padding:6px 8px" title="Select WiFi network or type manually">
-            <option value="">Select or type SSID…</option>
-          </select>
-          <button id="btnScanModal" class="btn ghost sm" title="Scan for networks">🔄</button>
-        </div>
-        <input id="ssidInput" class="input" placeholder="Or type network name manually" style="margin-bottom:12px;display:none" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" inputmode="text" name="tds8_ssid"/>
+        <input id="ssidInput" class="input" placeholder="Enter network name" style="margin-bottom:12px" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" inputmode="text" name="tds8_ssid"/>
         
         <label>Password</label>
         <input id="pwd" class="input" type="password" placeholder="Enter password" style="margin-bottom:16px" autocomplete="new-password" data-lpignore="true" name="tds8_wifi_password"/>
@@ -555,18 +583,22 @@ function disconnect(path) {
     updateFooterSerial(null);
     updateConnectionStatus(false);
     updateConnectionBanner('none', '—');
-    // Reset connection UI (legacy WiFi elements removed)
-    // const wifiStatus = $('#wifiStatus');
-    // const wifiSelect = $('#wifiNetworkSelect');
-    // const wiredStatus = $('#wiredStatus');
-    // const wiredBtn = $('#btnWiredConnect');
-    // const comSelect = $('#comPortSelect');
-    // 
-    // if (wifiStatus) { wifiStatus.textContent = 'Disconnected'; wifiStatus.style.background = '#e5e7eb'; wifiStatus.style.color = '#6b7280'; }
-    // if (wifiSelect) wifiSelect.style.backgroundColor = '';
-    // if (wiredStatus) { wiredStatus.textContent = 'Disconnected'; wiredStatus.style.background = '#e5e7eb'; wiredStatus.style.color = '#6b7280'; }
-    // if (wiredBtn) { wiredBtn.textContent = 'Connect'; wiredBtn.className = 'btn primary sm'; }
-    // if (comSelect) comSelect.style.backgroundColor = '';
+    // Reset wired connection UI
+    const wiredBtn = $('#btnWiredConnect');
+    const comSelect = $('#comPortSelect');
+    const wiredStatus = $('#wiredStatus');
+    if (wiredBtn) {
+      wiredBtn.textContent = 'Connect';
+      wiredBtn.className = 'btn primary sm';
+    }
+    if (comSelect) {
+      comSelect.style.backgroundColor = '';
+    }
+    if (wiredStatus) {
+      wiredStatus.textContent = 'Disconnected';
+      wiredStatus.style.background = '#e5e7eb';
+      wiredStatus.style.color = '#6b7280';
+    }
   }
   log(`✓ Disconnected from device - Serial port released for Arduino IDE`, 'info');
   scanDevices();
@@ -889,12 +921,171 @@ async function scanWiFiNetworks() {
 
 // All WiFi and Firmware button handlers moved to DOMContentLoaded
 
-  // Old WiFi functions (replaced by modal system)
-  // function displayNetworkList() - removed
-  // function connectToNetwork() - removed
-  // function saveNetwork() - removed
-  // function scanWiFiNetworks() - removed (replaced by scanWiFiModal)
-  // let scannedNetworks = [] - no longer needed
+// ----- Wi-Fi -----
+let scannedNetworks = [];
+
+function displayNetworkList() {
+  const container = $('#networkList');
+  container.innerHTML = '';
+  
+  // Show saved networks first
+  if (savedWifiNetworks.length > 0) {
+    const savedHeader = document.createElement('div');
+    savedHeader.style.padding = '12px 16px 8px';
+    savedHeader.style.fontSize = '11px';
+    savedHeader.style.fontWeight = '600';
+    savedHeader.style.color = 'var(--muted)';
+    savedHeader.style.textTransform = 'uppercase';
+    savedHeader.style.letterSpacing = '0.5px';
+    savedHeader.textContent = 'Saved Networks';
+    container.appendChild(savedHeader);
+    
+    savedWifiNetworks.forEach((network, idx) => {
+      const item = document.createElement('div');
+      item.className = 'network-item saved';
+      item.innerHTML = `
+        <div class="name">📡 ${network.ssid}</div>
+        <div class="icon">✓</div>
+      `;
+      item.onclick = () => connectToNetwork(network.ssid, network.password);
+      container.appendChild(item);
+    });
+  }
+  
+  // Show scanned networks
+  if (scannedNetworks.length > 0) {
+    const scannedHeader = document.createElement('div');
+    scannedHeader.style.padding = '12px 16px 8px';
+    scannedHeader.style.fontSize = '11px';
+    scannedHeader.style.fontWeight = '600';
+    scannedHeader.style.color = 'var(--muted)';
+    scannedHeader.style.textTransform = 'uppercase';
+    scannedHeader.style.letterSpacing = '0.5px';
+    scannedHeader.textContent = 'Available Networks';
+    container.appendChild(scannedHeader);
+    
+    scannedNetworks.forEach(ssid => {
+      // Skip if already saved
+      if (savedWifiNetworks.some(n => n.ssid === ssid)) return;
+      
+      const item = document.createElement('div');
+      item.className = 'network-item';
+      item.innerHTML = `
+        <div class="name">📡 ${ssid}</div>
+        <div class="icon">→</div>
+      `;
+      item.onclick = () => {
+        // Pre-fill the add network modal with this SSID
+        $('#ssidInput').value = ssid;
+        $('#modalAddNetwork').style.display = 'block';
+      };
+      container.appendChild(item);
+    });
+  }
+  
+  // Add placeholder if no networks at all
+  if (savedWifiNetworks.length === 0 && scannedNetworks.length === 0) {
+    const placeholder = document.createElement('div');
+    placeholder.style.padding = '20px';
+    placeholder.style.textAlign = 'center';
+    placeholder.style.color = 'var(--muted)';
+    placeholder.style.fontSize = '12px';
+    placeholder.textContent = 'No networks found. Click "Scan for Networks" or "Add Network".';
+    container.appendChild(placeholder);
+  }
+}
+
+async function connectToNetwork(ssid, password) {
+  // Step 1: Send WiFi credentials
+  log(`📡 Step 1/3: Saving WiFi credentials for "${ssid}"...`, 'info');
+  const r1 = await fetch('/api/wifi-join', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ ssid, password })
+  });
+  
+  const j1 = await r1.json();
+  if (!j1.ok) {
+    log(`✗ Failed to save WiFi credentials: ${j1.error}`, 'err');
+    return;
+  }
+  
+  log(`✓ WiFi credentials saved`, 'out');
+  
+  // Step 2: Disable wired-only mode
+  log(`📡 Step 2/3: Enabling WiFi mode...`, 'info');
+  await new Promise(r => setTimeout(r, 500)); // Small delay
+  
+  const r2 = await fetch('/api/comm-mode', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ mode: 'wifi' })
+  });
+  
+  const j2 = await r2.json();
+  if (!j2.ok) {
+    log(`✗ Failed to enable WiFi mode: ${j2.error}`, 'err');
+    return;
+  }
+  
+  log(`✓ WiFi mode enabled`, 'out');
+  
+  // Step 3: Reboot device
+  log(`📡 Step 3/3: Rebooting device to connect to WiFi...`, 'info');
+  await new Promise(r => setTimeout(r, 1000)); // Wait for settings to save
+  
+  try {
+    await fetch('/api/send', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ cmd: 'REBOOT' })
+    });
+  } catch (e) {
+    // Device may disconnect before responding, that's OK
+  }
+  
+  log(`✓ Device rebooting...`, 'out');
+  log(`⚠️ Device will disconnect from USB and connect to "${ssid}"`, 'info');
+  log(`⏳ Wait 10-15 seconds for device to connect to WiFi`, 'info');
+  log(`💡 Check your router to find the device's IP address`, 'info');
+  
+  $('#modalWifi').style.display = 'none';
+}
+
+async function saveNetwork() {
+  const ssid = $('#ssidInput').value.trim();
+  const password = $('#pwd').value;
+  
+  if (!ssid) {
+    log('✗ Please enter a network name', 'err');
+    return;
+  }
+  
+  // Check if already saved
+  const existing = savedWifiNetworks.findIndex(n => n.ssid === ssid);
+  if (existing >= 0) {
+    // Update password
+    savedWifiNetworks[existing].password = password;
+  } else {
+    // Add new
+    savedWifiNetworks.push({ ssid, password });
+  }
+  
+  saveSavedNetworks();
+  log(`✓ Saved network: ${ssid}`, 'out');
+  
+  // Connect to it
+  await connectToNetwork(ssid, password);
+  
+  // Clear inputs and close
+  $('#ssidInput').value = '';
+  $('#pwd').value = '';
+  $('#modalAddNetwork').style.display = 'none';
+  
+  displayNetworkList();
+};
+
+// ----- Firmware -----
 const MANIFEST_URL = 'https://raw.githubusercontent.com/m1llipede/tds8/main/manifest.json';
 
 async function checkFirmware() {
@@ -1025,36 +1216,14 @@ function sendCommand() {
       setTimeout(() => checkDeviceStatus(), 1000);
     }
     
-    // Handle serial port close (device disconnected) - updated for multi-device support
+    // Handle serial port close (device disconnected)
     if (msg.type === 'serial-close') {
       log(`⚠️ Serial port closed: ${msg.path}`, 'warn');
-      
-      // Handle both legacy single-device and multi-device close messages
-      if (msg.deviceId !== undefined) {
-        // Multi-device close message
-        console.log(`🔌 Multi-device ${msg.deviceId} disconnected: ${msg.path}`);
-        // Remove from connected devices map if path is provided
-        if (msg.path) {
-          connectedDevices.delete(msg.path);
-        }
-        // Update current device if this was the active one
-        if (currentDevice === msg.path) {
-          currentDevice = null;
-          updateConnectionStatus(false);
-        }
-      } else {
-        // Legacy single-device close message
-        console.log(`🔌 Legacy device disconnected: ${msg.path}`);
-        if (msg.path) {
-          connectedDevices.delete(msg.path);
-        }
-        if (currentDevice === msg.path) {
-          currentDevice = null;
-          updateConnectionStatus(false);
-        }
+      connectedDevices.delete(msg.path);
+      if (currentDevice === msg.path) {
+        currentDevice = null;
+        updateConnectionStatus(false);
       }
-      
-      // Always refresh device list and rebuild track grid
       scanDevices();
       buildTrackGrid();
     }
@@ -1079,76 +1248,116 @@ function sendCommand() {
       }
     }
     
-    // Handle device mode update (on startup) - legacy WiFi elements removed
+    // Handle device mode update (on startup)
     if (msg.type === 'device-mode') {
       updateConnectionBanner(msg.mode, msg.ip);
       
-      // Legacy WiFi UI elements removed
-      // const wifiStatus = $('#wifiStatus');
-      // const wifiSelect = $('#wifiNetworkSelect');
-      // const wiredStatus = $('#wiredStatus');
-      // const wiredBtn = $('#btnWiredConnect');
-      // const comSelect = $('#comPortSelect');
-      // 
-      // if (msg.mode === 'wifi') {
-      //   if (wifiStatus) { wifiStatus.textContent = 'Connected'; wifiStatus.style.background = '#10b981'; wifiStatus.style.color = '#fff'; }
-      //   if (wifiSelect) wifiSelect.style.backgroundColor = '#d1fae5';
-      //   if (wiredStatus) { wiredStatus.textContent = 'Disconnected'; wiredStatus.style.background = '#e5e7eb'; wiredStatus.style.color = '#6b7280'; }
-      //   if (wiredBtn) { wiredBtn.textContent = 'Connect'; wiredBtn.className = 'btn primary sm'; }
-      //   if (comSelect) comSelect.style.backgroundColor = '';
-      // } else {
-      //   if (wiredStatus) { wiredStatus.textContent = 'Connected'; wiredStatus.style.background = '#10b981'; wiredStatus.style.color = '#fff'; }
-      //   if (comSelect) comSelect.style.backgroundColor = '#d1fae5';
-      //   if (wifiStatus) { wifiStatus.textContent = 'Disconnected'; wifiStatus.style.background = '#e5e7eb'; wifiStatus.style.color = '#6b7280'; }
-      //   if (wifiSelect) wifiSelect.style.backgroundColor = '';
-      // }
-    }
-    
-    // Handle Ableton connection status updates
-    if (msg.type === 'ableton-connected') {
-      log('✅ Ableton Live connected via OSC handshake', 'info');
-      // Update UI to show Ableton is connected
-      const abletonStatus = document.getElementById('abletonStatus');
-      if (abletonStatus) {
-        abletonStatus.textContent = 'Connected';
-        abletonStatus.style.background = '#10b981';
-        abletonStatus.style.color = '#fff';
+      const wifiStatus = $('#wifiStatus');
+      const wifiSelect = $('#wifiNetworkSelect');
+      const wiredStatus = $('#wiredStatus');
+      const wiredBtn = $('#btnWiredConnect');
+      const comSelect = $('#comPortSelect');
+      
+      if (msg.mode === 'wifi') {
+        // Device is in WiFi mode
+        if (wifiStatus) {
+          wifiStatus.textContent = 'Connected';
+          wifiStatus.style.background = '#10b981';
+          wifiStatus.style.color = '#fff';
+        }
+        if (wifiSelect) {
+          wifiSelect.style.backgroundColor = '#d1fae5';
+        }
+        if (wiredStatus) {
+          wiredStatus.textContent = 'Disconnected';
+          wiredStatus.style.background = '#e5e7eb';
+          wiredStatus.style.color = '#6b7280';
+        }
+        if (wiredBtn) {
+          wiredBtn.textContent = 'Connect';
+          wiredBtn.className = 'btn primary sm';
+        }
+        if (comSelect) {
+          comSelect.style.backgroundColor = '';
+        }
+      } else {
+        // Device is in Wired mode
+        if (wiredStatus) {
+          wiredStatus.textContent = 'Connected';
+          wiredStatus.style.background = '#10b981';
+          wiredStatus.style.color = '#fff';
+        }
+        if (comSelect) {
+          comSelect.style.backgroundColor = '#d1fae5';
+        }
+        if (wifiStatus) {
+          wifiStatus.textContent = 'Disconnected';
+          wifiStatus.style.background = '#e5e7eb';
+          wifiStatus.style.color = '#6b7280';
+        }
+        if (wifiSelect) {
+          wifiSelect.style.backgroundColor = '';
+        }
       }
     }
-    if (msg.type === 'ableton-disconnected') {
-      log('⚠️ Ableton Live disconnected (no OSC handshake)', 'warn');
-      // Update UI to show Ableton is disconnected
-      const abletonStatus = document.getElementById('abletonStatus');
-      if (abletonStatus) {
-        abletonStatus.textContent = 'Disconnected';
-        abletonStatus.style.background = '#ef4444';
-        abletonStatus.style.color = '#fff';
-      }
+    
+    // OSC messages in Serial Monitor
+    if (msg.type === 'osc-sent') {
+      log(`Sent: ${msg.address}${msg.argsStr || ''}`, 'out');
+    }
+    if (msg.type === 'osc-received') {
+      const argsStr = msg.args && msg.args.length > 0 
+        ? ' [' + msg.args.map(a => a.value).join(', ') + ']' 
+        : '';
+      log(`Received: ${msg.address}${argsStr}`, 'info');
     }
     
-    // Handle device IP update (WiFi connection) - legacy WiFi elements removed
+    // Handle device IP update (WiFi connection)
     if (msg.type === 'device-ip') {
       console.log('📡 Received device-ip:', msg);
+      const wifiStatus = $('#wifiStatus');
+      const wifiSelect = $('#wifiNetworkSelect');
+      const wiredStatus = $('#wiredStatus');
+      const wiredBtn = $('#btnWiredConnect');
+      const comSelect = $('#comPortSelect');
       
-      // Legacy WiFi UI elements removed
-      // const wifiStatus = $('#wifiStatus');
-      // const wifiSelect = $('#wifiNetworkSelect');
-      // const wiredStatus = $('#wiredStatus');
-      // const wiredBtn = $('#btnWiredConnect');
-      // const comSelect = $('#comPortSelect');
-      // 
-      // if (msg.connectionType === 'wifi') {
-      //   log(`✅ Device connected to WiFi: ${msg.ip}${msg.ssid ? ' (' + msg.ssid + ')' : ''}`, 'out');
-      //   updateConnectionBanner('wifi', msg.ip);
-      //   if (wifiStatus) { wifiStatus.textContent = 'Connected'; wifiStatus.style.background = '#10b981'; wifiStatus.style.color = '#fff'; }
-      //   if (wifiSelect) wifiSelect.style.backgroundColor = '#d1fae5';
-      //   if (wiredStatus) { wiredStatus.textContent = 'Disconnected'; wiredStatus.style.background = '#e5e7eb'; wiredStatus.style.color = '#6b7280'; }
-      //   if (wiredBtn) { wiredBtn.textContent = 'Connect'; wiredBtn.className = 'btn primary sm'; }
-      //   if (comSelect) comSelect.style.backgroundColor = '';
-      //   updateConnectionStatus(false);
-      // } else if (msg.connectionType === 'wired') {
-      //   updateConnectionBanner('wired', msg.ip);
-      // }
+      if (msg.connectionType === 'wifi') {
+        // Device connected to WiFi
+        log(`✅ Device connected to WiFi: ${msg.ip}${msg.ssid ? ' (' + msg.ssid + ')' : ''}`, 'out');
+        
+        // Update connection banner
+        console.log('📡 Updating banner to WiFi:', msg.ip);
+        updateConnectionBanner('wifi', msg.ip);
+        
+        if (wifiStatus) {
+          wifiStatus.textContent = 'Connected';
+          wifiStatus.style.background = '#10b981';
+          wifiStatus.style.color = '#fff';
+        }
+        if (wifiSelect) {
+          wifiSelect.style.backgroundColor = '#d1fae5';
+        }
+        
+        // Clear wired connection UI (USB disconnects when WiFi connects)
+        if (wiredStatus) {
+          wiredStatus.textContent = 'Disconnected';
+          wiredStatus.style.background = '#e5e7eb';
+          wiredStatus.style.color = '#6b7280';
+        }
+        if (wiredBtn) {
+          wiredBtn.textContent = 'Connect';
+          wiredBtn.className = 'btn primary sm';
+        }
+        if (comSelect) {
+          comSelect.style.backgroundColor = '';
+        }
+        
+        // Update connection status
+        updateConnectionStatus(false);
+      } else if (msg.connectionType === 'wired') {
+        // Device connected via USB
+        updateConnectionBanner('wired', msg.ip);
+      }
     }
   };
   ws.onerror = () => log('✗ WebSocket connection error', 'err');
@@ -1174,13 +1383,64 @@ async function loadStoredTrackNames() {
   }
 }
 
-// Check device status on load - legacy WiFi elements removed
+// Check device status on load
 async function checkDeviceStatus() {
   try {
     const res = await fetch('/api/device-status');
     const data = await res.json();
     if (data.ok && data.connectionType !== 'none') {
       updateConnectionBanner(data.connectionType, data.ip);
+      
+      const wifiStatus = $('#wifiStatus');
+      const wifiSelect = $('#wifiNetworkSelect');
+      const wiredStatus = $('#wiredStatus');
+      const wiredBtn = $('#btnWiredConnect');
+      const comSelect = $('#comPortSelect');
+      
+      if (data.connectionType === 'wifi') {
+        // Update WiFi UI
+        if (wifiStatus) {
+          wifiStatus.textContent = 'Connected';
+          wifiStatus.style.background = '#10b981';
+          wifiStatus.style.color = '#fff';
+        }
+        if (wifiSelect) {
+          wifiSelect.style.backgroundColor = '#d1fae5';
+        }
+        // Clear wired UI
+        if (wiredStatus) {
+          wiredStatus.textContent = 'Disconnected';
+          wiredStatus.style.background = '#e5e7eb';
+          wiredStatus.style.color = '#6b7280';
+        }
+        if (wiredBtn) {
+          wiredBtn.textContent = 'Connect';
+          wiredBtn.className = 'btn primary sm';
+        }
+        if (comSelect) {
+          comSelect.style.backgroundColor = '';
+        }
+      } else if (data.connectionType === 'wired') {
+        // Update Wired UI
+        if (wiredStatus) {
+          wiredStatus.textContent = 'Connected';
+          wiredStatus.style.background = '#10b981';
+          wiredStatus.style.color = '#fff';
+        }
+        if (comSelect) {
+          comSelect.style.backgroundColor = '#d1fae5';
+        }
+        // Clear WiFi UI
+        if (wifiStatus) {
+          wifiStatus.textContent = 'Disconnected';
+          wifiStatus.style.background = '#e5e7eb';
+          wifiStatus.style.color = '#6b7280';
+        }
+        if (wifiSelect) {
+          wifiSelect.style.backgroundColor = '';
+        }
+      }
+      
       log(`Device already connected: ${data.connectionType} (${data.ip})`, 'info');
     }
   } catch (e) {
@@ -1267,24 +1527,20 @@ window.addEventListener('DOMContentLoaded', () => {
     btnSaveTracks.onclick = saveTracksToBridge;
   }
 
-  // WiFi buttons (legacy handlers removed)
-  // const btnScanNetworks = document.getElementById('btnScanNetworks');
-  // if (btnScanNetworks) btnScanNetworks.onclick = scanWiFiNetworks;
+  // WiFi buttons
+  const btnScanNetworks = document.getElementById('btnScanNetworks');
+  if (btnScanNetworks) btnScanNetworks.onclick = scanWiFiNetworks;
 
-  // const btnWifiScanQuick = document.getElementById('btnWifiScanQuick');
-  // if (btnWifiScanQuick) btnWifiScanQuick.onclick = scanWiFiNetworks;
+  const btnWifiScanQuick = document.getElementById('btnWifiScanQuick');
+  if (btnWifiScanQuick) btnWifiScanQuick.onclick = scanWiFiNetworks;
 
-  // const btnAddNetwork = document.getElementById('btnAddNetwork');
-  // if (btnAddNetwork) btnAddNetwork.onclick = () => $('#modalAddNetwork').style.display = 'block';
+  const btnAddNetwork = document.getElementById('btnAddNetwork');
+  if (btnAddNetwork) btnAddNetwork.onclick = () => $('#modalAddNetwork').style.display = 'block';
 
-  // const btnCancelAdd = document.getElementById('btnCancelAdd');
-  // if (btnCancelAdd) btnCancelAdd.onclick = () => $('#modalAddNetwork').style.display = 'none';
+  // btnCancelAdd and btnSaveNetwork handlers moved below (after WiFi modal logic)
 
-  // const btnSaveNetwork = document.getElementById('btnSaveNetwork');
-  // if (btnSaveNetwork) btnSaveNetwork.onclick = saveNetwork;
-
-  // const btnCloseWifi = document.getElementById('btnCloseWifi');
-  // if (btnCloseWifi) btnCloseWifi.onclick = () => $('#modalWifi').style.display = 'none';
+  const btnCloseWifi = document.getElementById('btnCloseWifi');
+  if (btnCloseWifi) btnCloseWifi.onclick = () => $('#modalWifi').style.display = 'none';
 
   // Firmware buttons
   const btnFirmwareTop = document.getElementById('btnFirmwareTop');
@@ -1318,47 +1574,29 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Legacy WiFi scan function (removed - replaced by scanWiFiModal)
-  // async function scanWifiTop() { ... } - no longer needed
-
-  // WiFi modal scan functionality
-  async function scanWiFiModal() {
-    const dropdown = document.getElementById('ssidDropdown');
-    const scanBtn = document.getElementById('btnScanModal');
-    if (!dropdown || !scanBtn) return;
-    
-    scanBtn.disabled = true;
-    scanBtn.textContent = '⏳';
-    
+  // Populate SSIDs for top inline controls
+  async function scanWifiTop() {
+    const sel = document.getElementById('wifiSsidTop');
+    if (!sel) return;
     try {
-      log('📡 Scanning for WiFi networks...', 'info');
       const res = await fetch('/api/wifi-scan');
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'scan failed');
-      
-      // Clear and refill dropdown
-      dropdown.innerHTML = '<option value=\"\">Select or type SSID…</option>';
-      if (data.ssids && Array.isArray(data.ssids)) {
-        data.ssids.forEach(ssid => {
-          if (ssid) {
-            const opt = document.createElement('option');
-            opt.value = ssid;
-            opt.textContent = ssid;
-            dropdown.appendChild(opt);
-          }
-        });
-        log(`✓ Found ${data.ssids.length} networks`, 'out');
-      } else {
-        // No networks found, add manual option
-        dropdown.innerHTML = '<option value=\"\">Type SSID manually…</option>';
-        log('⚠️ No networks found, enter manually', 'info');
-      }
+      const items = Array.isArray(data) ? data : (data.networks || []);
+      // Clear and refill
+      sel.innerHTML = '<option value="">Select SSID…</option>';
+      items.forEach(n => {
+        const ssid = n.ssid || n.SSID || n.name;
+        if (ssid) {
+          const opt = document.createElement('option');
+          opt.value = ssid; opt.textContent = ssid;
+          sel.appendChild(opt);
+        }
+      });
     } catch (e) {
-      log(`✖ WiFi scan failed: ${e.message}`, 'error');
-      dropdown.innerHTML = '<option value=\"\">Type SSID manually…</option>';
-    } finally {
-      scanBtn.disabled = false;
-      scanBtn.textContent = '🔄';
+      // If scan fails, keep manual entry via text option
+      const sel = document.getElementById('wifiSsidTop');
+      if (sel && sel.querySelector('option')) sel.querySelector('option').textContent = 'Enter SSID manually…';
     }
   }
 
@@ -1370,8 +1608,13 @@ window.addEventListener('DOMContentLoaded', () => {
         const modal = document.getElementById('modalAddNetwork');
         if (modal) {
           modal.style.display = 'block';
-          // Auto-scan for networks
-          setTimeout(() => scanWiFiModal(), 200);
+          // Load saved password if SSID was previously used
+          const ssidInput = document.getElementById('ssidInput');
+          const pwdInput = document.getElementById('pwd');
+          if (ssidInput && ssidInput.value) {
+            const savedPwd = localStorage.getItem('tds8_wifi_' + ssidInput.value);
+            if (savedPwd && pwdInput) pwdInput.value = savedPwd;
+          }
         }
       } else {
         // Wired mode selected
@@ -1381,21 +1624,13 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
-  
+
   // Save & Connect button handler (WiFi modal)
   const btnSaveNetwork = document.getElementById('btnSaveNetwork');
   if (btnSaveNetwork) btnSaveNetwork.onclick = async () => {
-    const dropdown = document.getElementById('ssidDropdown');
-    const manualInput = document.getElementById('ssidInput');
+    const ssidInput = document.getElementById('ssidInput');
     const pwdInput = document.getElementById('pwd');
-    
-    let ssid = '';
-    if (dropdown && dropdown.value && dropdown.value !== '') {
-      ssid = dropdown.value.trim();
-    } else if (manualInput && manualInput.value && manualInput.value !== '') {
-      ssid = manualInput.value.trim();
-    }
-    
+    const ssid = ssidInput && ssidInput.value ? ssidInput.value.trim() : '';
     const password = pwdInput ? pwdInput.value : '';
     if (!ssid) { log('SSID is required', 'error'); return; }
     try {
@@ -1417,6 +1652,16 @@ window.addEventListener('DOMContentLoaded', () => {
       log(`✖ WiFi join failed: ${err.message}`, 'error');
     }
   };
+  
+  // Cancel button handler (WiFi modal)
+  const btnCancelAdd = document.getElementById('btnCancelAdd');
+  if (btnCancelAdd) btnCancelAdd.onclick = () => {
+    const modal = document.getElementById('modalAddNetwork');
+    if (modal) modal.style.display = 'none';
+    // Revert dropdown to Wired
+    const typeSelect = document.getElementById('connectionTypeSelect');
+    if (typeSelect) typeSelect.value = 'wired';
+  };
 
   // Quick actions
   async function apiSend(cmd) {
@@ -1435,11 +1680,55 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  const qaWired = document.getElementById('qaWired');
+  if (qaWired) qaWired.onclick = async () => {
+    await apiSend('WIRED_ONLY true');
+    setTimeout(() => apiSend('REBOOT ALL'), 500);
+  };
+
+  const qaWifi = document.getElementById('qaWifi');
+  if (qaWifi) qaWifi.onclick = () => {
+    const modal = document.getElementById('modalAddNetwork');
+    if (modal) modal.style.display = 'block';
+    // Set dropdown to WiFi
+    const typeSelect = document.getElementById('connectionTypeSelect');
+    if (typeSelect) typeSelect.value = 'wifi';
+  };
+
   const qaRebootAll = document.getElementById('qaRebootAll');
   if (qaRebootAll) qaRebootAll.onclick = () => apiSend('REBOOT ALL');
 
   const qaVersionAll = document.getElementById('qaVersionAll');
   if (qaVersionAll) qaVersionAll.onclick = () => apiSend('VERSION ALL');
+
+  const qaConnectAll = document.getElementById('qaConnectAll');
+  if (qaConnectAll) qaConnectAll.onclick = async () => {
+    try {
+      log('🔌 Connecting all detected TDS-8 devices…', 'info');
+      const res = await fetch('/api/ports');
+      const ports = await res.json();
+      if (!Array.isArray(ports) || ports.length === 0) {
+        log('No serial ports found.', 'error');
+        return;
+      }
+      // Connect each detected TDS-8 (filter by isTDS8 when present)
+      for (const p of ports) {
+        if (p.isTDS8 || true) {
+          try {
+            await fetch('/api/connect', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ path: p.path })
+            });
+          } catch (e) {}
+        }
+      }
+      // After a moment, query versions to verify
+      setTimeout(() => apiSend('VERSION ALL'), 800);
+    } catch (err) {
+      log(`✖ Connect All failed: ${err.message}`, 'error');
+    }
+  };
 
   const btnReadTracks = document.getElementById('btnReadTracks');
   if (btnReadTracks) {
@@ -1465,16 +1754,91 @@ window.addEventListener('DOMContentLoaded', () => {
     };
   }
 
-  // Legacy wired connection handler (removed - functionality now in device list)
-  // const wiredConnectBtn = document.getElementById('btnWiredConnect');
-  // if (wiredConnectBtn) wiredConnectBtn.onclick = async () => { ... };
+  const wiredConnectBtn = document.getElementById('btnWiredConnect');
+  if (wiredConnectBtn) {
+    wiredConnectBtn.onclick = async () => {
+      if (currentDevice) {
+        await fetch('/api/disconnect', { method: 'POST' });
+        disconnect(currentDevice);
+        return;
+      }
+      const comSelect = document.getElementById('comPortSelect');
+      const path = comSelect ? comSelect.value : '';
+      if (!path) { 
+        log('✗ Select a COM port from the dropdown', 'err'); 
+        return; 
+      }
+      try {
+        const portName = path.split(/[/\\]/).pop();
+        await connect(path, portName, null);
+        wiredConnectBtn.textContent = 'Disconnect';
+        wiredConnectBtn.className = 'btn ghost sm';
+        comSelect.style.backgroundColor = '#d1fae5';
+        const wiredStatus = $('#wiredStatus');
+        if (wiredStatus) {
+          wiredStatus.textContent = 'Connected';
+          wiredStatus.style.background = '#10b981';
+          wiredStatus.style.color = '#fff';
+        }
+      } catch (e) {
+        log(`✗ Connect failed: ${e.message}`, 'err');
+      }
+    };
+  }
 
-  // Legacy WiFi handlers (removed)
-  // const wifiConnectBtn = document.getElementById('btnWifiConnect');
-  // if (wifiConnectBtn) wifiConnectBtn.onclick = async () => { ... };
+  const wifiConnectBtn = document.getElementById('btnWifiConnect');
+  if (wifiConnectBtn) {
+    wifiConnectBtn.onclick = async () => {
+      if (!currentDevice) {
+        log('✗ Please connect to TDS-8 device first (wired connection required to configure WiFi)', 'err');
+        return;
+      }
+      const wifiSelect = document.getElementById('wifiNetworkSelect');
+      const ssid = wifiSelect ? wifiSelect.value : '';
+      if (!ssid) {
+        log('✗ Select a WiFi network from the dropdown', 'err');
+        return;
+      }
+      const savedNetwork = savedWifiNetworks.find(n => n.ssid === ssid);
+      let password;
+      if (savedNetwork) {
+        password = savedNetwork.password;
+        log(`📡 Using saved password for "${ssid}"`, 'info');
+      } else {
+        password = prompt(`Enter password for WiFi network "${ssid}":\n\n(Leave blank if no password)`);
+        if (password === null) return;
+      }
+      log(`📡 Configuring TDS-8 to connect to "${ssid}"...`, 'info');
+      log('⚠️ Device will disconnect from USB and switch to WiFi mode', 'info');
+      await connectToNetwork(ssid, password);
+    };
+  }
 
-  // Auto-scan WiFi networks (legacy - removed)
-  // setTimeout(async () => { ... }, 2000); - no longer needed with modal system
+  // Auto-scan WiFi networks after a short delay
+  setTimeout(async () => {
+    try {
+      const res = await fetch('/api/wifi-scan');
+      const data = await res.json();
+      if (data.ok && data.ssids) {
+        scannedNetworks = data.ssids;
+        const wifiSelect = $('#wifiNetworkSelect');
+        if (wifiSelect) {
+          wifiSelect.innerHTML = '<option value="">Select WiFi network...</option>';
+          data.ssids.forEach(ssid => {
+            const option = document.createElement('option');
+            option.value = ssid;
+            option.textContent = ssid;
+            wifiSelect.appendChild(option);
+          });
+        }
+        console.log(`✓ Auto-scan found ${data.ssids.length} WiFi networks`);
+      } else {
+        console.log('WiFi scan returned no networks:', data);
+      }
+    } catch (err) {
+      console.log('WiFi scan on startup failed:', err);
+    }
+  }, 2000);
 });
 </script>
 </body>

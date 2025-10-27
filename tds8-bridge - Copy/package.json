@@ -1,0 +1,25 @@
+{
+  "name": "tds8-bridge",
+  "version": "0.4.0",
+  "description": "Web-based bridge for TDS-8 (ESP32-C3): USB serial relay + browser UI + OSC integration",
+  "main": "index.js",
+  "bin": {
+    "tds8-bridge": "index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "@serialport/bindings-cpp": "^12.0.0",
+    "@serialport/list": "^12.0.0",
+    "@serialport/stream": "^12.0.0",
+    "express": "^4.19.2",
+    "morgan": "^1.10.0",
+    "osc": "^2.4.5",
+    "ws": "^8.17.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
