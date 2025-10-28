@@ -393,7 +393,7 @@ initDeviceListener(); // Initialize device listener (port 9000 - from TDS-8)
 setTimeout(() => {
   console.log('\n🔍 OSC Status Check:');
   console.log(`  Sender (port 9001): ${oscSender && oscSender.socket ? '✅ Ready' : '❌ Failed'}`);
-  console.log(`  Listener (port 8000): ${oscReceiver && oscReceiver.socket ? '✅ Ready' : '❌ Failed'}`);
+  console.log(`  Listener (port ${OSC_LISTEN_PORT}): ${oscReceiver && oscReceiver.socket ? '✅ Ready' : '❌ Failed'}`);
   
   if (!oscSender || !oscSender.socket) {
     console.error('⚠️ OSC Sender failed to initialize - M4L communication will not work!');
@@ -401,7 +401,7 @@ setTimeout(() => {
   }
   if (!oscReceiver || !oscReceiver.socket) {
     console.error('⚠️ OSC Listener failed to initialize - Cannot receive from M4L!');
-    console.error('   Check if port 8000 is already in use by another application.');
+    console.error(`   Check if port ${OSC_LISTEN_PORT} is already in use by another application.`);
   }
   
   // Test send
@@ -496,6 +496,7 @@ function send(s) {
   }
   serial.write(s);
   console.log(`SENT: ${s.trim()}`);
+  uiLog(`[SERIAL] SENT: ${s.trim()}`);
 }
 
 // Multi-device: Send to specific device by ID
@@ -519,6 +520,7 @@ function sendToDevice(deviceId, s) {
   
   device.serial.write(s);
   console.log(`✅ SENT to Device ${deviceId} (${device.path}): ${s.trim()}`);
+  uiLog(`[Device ${deviceId}] SENT: ${s.trim()}`);
 }
 
 // Multi-device: Send to all connected devices
@@ -527,12 +529,14 @@ function sendToAll(s) {
     if (device.serial && device.serial.isOpen) {
       device.serial.write(s);
       console.log(`SENT to Device ${device.id}: ${s.trim()}`);
+      uiLog(`[Device ${device.id}] SENT: ${s.trim()}`);
     }
   });
 }
 
 // Multi-device: Handle serial data from specific device
 function onSerialDataMulti(device, chunk) {
+  try {
   const text = chunk.toString('utf8');
   device.buffer += text;
   wsBroadcast({ type: 'serial-data', deviceId: device.id, data: text });
@@ -559,6 +563,10 @@ function onSerialDataMulti(device, chunk) {
       }
     }
   }
+} catch (e) {
+  console.error(`CRITICAL: onSerialDataMulti error for device ${device.id}:`, e);
+  uiLog(`FATAL: Serial data handler failed for device ${device.id}: ${e.message}`);
+}
 }
 
 function onSerialData(chunk) {
@@ -603,6 +611,9 @@ function onSerialData(chunk) {
 // -------- API --------
 app.get('/api/ports', async (_req, res) => {
   const ports = await listPorts();
+  console.log('--- UNFILTERED PORT DETAILS (from /api/ports) ---');
+  ports.forEach(p => console.log(JSON.stringify(p, null, 2)));
+  console.log('-------------------------------------------------');
   console.log('🔍 All serial ports found:', ports.map(p => ({
     path: p.path,
     vid: p.vendorId,
@@ -731,9 +742,23 @@ app.get('/api/ports/all', async (_req, res) => {
     };
   });
   
-  console.log(`📋 All COM ports (unfiltered): ${decorated.length} found`);
-  console.log('Final port labels:', decorated.map(p => `${p.path} = "${p.label}"`).join(', '));
-  res.json(decorated);
+  const filteredPorts = decorated.filter(p => {
+    const mfg = (p.manufacturer || '').toLowerCase();
+    const lbl = (p.label || '').toLowerCase();
+    const isTDS8 = 
+      mfg.includes('arduino') || 
+      mfg.includes('seeed') || 
+      lbl.includes('tds-8') || 
+      p.vendorId === '2886' || // Seeed Studio
+      p.vendorId === '2341' || // Arduino
+      p.vendorId === '1a86';   // Common CH340 serial chip
+
+    if (isTDS8) console.log(`✓ Found potential TDS-8: ${p.label}`);
+    return isTDS8;
+  });
+
+  console.log(`✅ Filtered to ${filteredPorts.length} potential TDS-8 device(s)`);
+  res.json(filteredPorts);
 });
 
 // Map COM ports to device IDs (persistent across disconnects)
@@ -821,6 +846,7 @@ app.post('/api/connect', async (req, res) => {
       sendToDevice(deviceId, `DEVICE_ID ${deviceId}\n`);
       sendToDevice(deviceId, 'VERSION\n');
       console.log(`✓ Connected: ${desired} → Device ID ${deviceId} (Tracks ${deviceId * 8 + 1}-${(deviceId + 1) * 8})`);
+
     }, 1000);
     
     // Broadcast device status to UI (wired mode)
@@ -833,11 +859,12 @@ app.post('/api/connect', async (req, res) => {
     
     wsBroadcast({ type: 'serial-open', path: desired, baud: BAUD });
     res.json({ ok: true, path: desired, baud: BAUD, deviceId });
-  } catch (e) { 
-    console.error('Connection error:', e);
-    res.status(500).json({ error: e.message }); 
+  } catch (e) {
+    console.error('CRITICAL: /api/connect error:', e);
+    uiLog(`FATAL: Connection handler failed: ${e.message}`);
+    res.status(500).json({ error: e.message });
   }
-});
+  });
 
 // Multi-device: Connect multiple TDS-8 devices
 app.post('/api/connect-multi', async (req, res) => {
@@ -1018,15 +1045,19 @@ app.post('/api/wifi-join', (req, res) => {
     // Send WiFi credentials to ALL connected devices
     if (devices.length > 0) {
       console.log(`📡 Sending WiFi join to all ${devices.length} devices`);
+      uiLog(`[WIFI] Sending credentials for "${ssid}"...`);
       sendToAll(cmd + '\n');
       
-      // Also send WIRED_ONLY false to all devices to enable WiFi mode
-      console.log(`📡 Sending WIRED_ONLY false to all ${devices.length} devices`);
-      sendToAll('WIRED_ONLY false\n');
-      
-      // Then reboot all devices to apply WiFi mode
-      console.log(`📡 Rebooting all ${devices.length} devices to apply WiFi settings`);
-      sendToAll('REBOOT\n');
+      // Wait a moment for credentials to be saved before rebooting
+      setTimeout(() => {
+        uiLog('[WIFI] Switching to WiFi mode...');
+        sendToAll('WIRED_ONLY false\n');
+        
+        setTimeout(() => {
+          uiLog('[WIFI] Rebooting devices to connect...');
+          sendToAll('REBOOT\n');
+        }, 250);
+      }, 500);
     } else if (serial && serial.isOpen) {
       send(cmd + '\n');
       send('WIRED_ONLY false\n');
@@ -1197,11 +1228,18 @@ app.post('/api/trackname', (req, res) => {
         send(cmd);
       }
     } else {
-      // Single device mode
-      const firstDevice = devices.length > 0 ? devices[0] : null;
-      const deviceInfo = firstDevice ? `[Device ${firstDevice.deviceID}] ${firstDevice.path}` : 'device';
-      send(cmd);
-      console.log(`📤 ${deviceInfo} ← Track ${at}: "${name}"`);
+      // Single device mode: prefer multi-device pipe if available
+      if (devices.length > 0) {
+        const d0 = devices[0];
+        sendToDevice(d0.id, cmd);
+        console.log(`📤 [Device ${d0.deviceID}] ${d0.path} ← Track ${at}: "${name}"`);
+      } else if (serial && serial.isOpen) {
+        // Legacy single-serial fallback
+        send(cmd);
+        console.log(`📤 [Serial] ← Track ${at}: "${name}"`);
+      } else {
+        throw new Error('No connected device to send trackname');
+      }
     }
     
     // Persist asynchronously; ignore errors
@@ -1419,9 +1457,9 @@ app.get('/api/osc-status', (req, res) => {
   res.json({
     ok: true,
     oscSenderPort: 9001,
-    oscListenerPort: 8000,
+    oscListenerPort: OSC_LISTEN_PORT,
     deviceListenerPort: 9000,
-    m4lTargetPort: 9000,
+    m4lTargetPort: M4L_PORT,
     m4lTargetIP: M4L_IP,
     lastHiReceived: lastHiTime ? new Date(lastHiTime).toISOString() : 'Never',
     timeSinceLastHi: timeSinceLastHi ? `${Math.floor(timeSinceLastHi / 1000)}s ago` : 'Never',
@@ -1482,14 +1520,21 @@ app.get('/api/ota-check', async (req, res) => {
 });
 
 // Firmware — load a feed of versions (optional)
-app.get('/api/fw-feed', async (req, res) => {
+
+// New endpoint to switch all devices to WiFi mode
+app.post('/api/wifi-switch-all', async (req, res) => {
   try {
-    const feedUrl = req.query.url || FW_FEED_URL;
-    if (!feedUrl) throw new Error('No feed URL provided');
-    const fPath = await fetchToTemp(feedUrl);
-    const feed = JSON.parse(await fs.promises.readFile(fPath, 'utf8'));
-    res.json({ ok: true, feed });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+    console.log('Broadcasting WiFi switch to all devices...');
+    sendToAll('WIRED_ONLY false\n');
+    sendToAll('WIFI_ON\n');
+    // Add a small delay before rebooting to ensure the command is processed
+    setTimeout(() => {
+      sendToAll('REBOOT\n');
+    }, 500);
+    res.json({ ok: true, message: 'WiFi switch and reboot commands sent to all devices.' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Firmware — start OTA from a manifest - updated for multi-device support
@@ -1544,6 +1589,14 @@ function compareVersions(a, b) {
 
 wss.on('connection', ws => {
   ws.send(JSON.stringify({ type: 'hello', port: serialPath, baud: BAUD }));
+  try {
+    const msg1 = `OSC: Bridge listening ${OSC_LISTEN_PORT} (from M4L), sending ${M4L_PORT} (to M4L)`;
+    const msg2 = `Device Listener: 0.0.0.0:9000 (receives /ipupdate from TDS-8)`;
+    const msg3 = `OSC Sender: 127.0.0.1:9001 -> ${M4L_IP}:${M4L_PORT}`;
+    ws.send(JSON.stringify({ type: 'serial-data', data: msg1 }));
+    ws.send(JSON.stringify({ type: 'serial-data', data: msg2 }));
+    ws.send(JSON.stringify({ type: 'serial-data', data: msg3 }));
+  } catch {}
 });
 
 // Auto-connect to all TDS-8 devices

@@ -261,6 +261,17 @@ let currentConnectionType = 'none'; // 'none', 'wired', 'wifi'
 let currentConnectionIP = '—';
 let deviceVersions = new Map(); // Store firmware versions by port path
 let deviceIdMap = new Map(); // Map serial numbers to device IDs for persistence
+let isM4LConnected = false;
+
+function updateM4LStatus(isConnected) {
+  isM4LConnected = isConnected;
+  // Update all visible device items
+  document.querySelectorAll('.m4l-status').forEach(el => {
+    el.innerHTML = isConnected
+      ? `<span style="color:#10b981;">🎵 M4L Connected</span>`
+      : `<span style="color:#ef4444;">⚠️ M4L Disconnected</span>`;
+  });
+}
 
 // Update connection status banner
 function updateConnectionBanner(type, ip) {
@@ -401,6 +412,7 @@ async function scanDevices() {
         <div>
           <div class="device-name">${displayName}${versionBadge}</div>
           ${statusText}
+          <div class="m4l-status" style="font-size:11px;margin-top:2px">${isM4LConnected ? '<span style="color:#10b981;">🎵 M4L Connected</span>' : '<span style="color:#ef4444;">⚠️ M4L Disconnected</span>'}</div>
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:8px">
@@ -521,11 +533,7 @@ async function connect(path, name, serialNum, retryCount = 0) {
       scanDevices();
       buildTrackGrid(); // Rebuild track grid with new device rows
       
-      // Send track names for this device's range after connection
-      setTimeout(async () => {
-        await sendTrackNamesForDevice(deviceId);
-      }, 1500);
-    } else {
+          } else {
       log(`✗ Connection failed: ${j.error || 'Unknown error'}`, 'err');
       // Only retry once
       if (retryCount < 1) {
@@ -732,26 +740,77 @@ async function refreshFromAbleton() {
   }, 400);
 }
 
-async function testOSC() {
-  log(`🧪 Testing OSC connection to M4L...`, 'info');
-  
+// ---- WebSocket: stream logs and state from Bridge ----
+function initWebSocket() {
   try {
-    const res = await fetch('/api/osc-test', {
-      method: 'POST'
-    });
-    
-    const data = await res.json();
-    if (data.ok) {
-      log(`✓ ${data.message}`, 'out');
-      log(`Check bridge console for "📤 OSC → M4L" message`, 'info');
-      log(`If M4L responds, you'll see "✓ Received /hi from M4L"`, 'info');
-    } else {
-      log(`✗ ${data.error}`, 'err');
-    }
-  } catch (err) {
-    log(`✗ Error: ${err.message}`, 'err');
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(`${proto}://${location.host}`);
+    ws.onopen = () => { log('✓ WebSocket connected to Bridge', 'info'); };
+    ws.onclose = () => { log('✗ WebSocket disconnected from Bridge', 'err'); };
+    ws.onerror = () => { log('✗ WebSocket error', 'err'); };
+    ws.onmessage = (evt) => {
+      let msg;
+      try { msg = JSON.parse(evt.data); } catch { return; }
+      if (!msg || !msg.type) return;
+      switch (msg.type) {
+        case 'serial-data':
+          if (msg.data) log(String(msg.data));
+          break;
+        case 'osc-sent': {
+          const a = msg.address || '';
+          const args = Array.isArray(msg.args) ? msg.args.map(x => x.value ?? x).join(', ') : (msg.argsStr || '');
+          log(`OSC → ${a}${args ? ' [' + args + ']' : ''}`, 'out');
+          break;
+        }
+        case 'osc-received': {
+          const a = msg.address || '';
+          const args = Array.isArray(msg.args) ? msg.args.map(x => x.value ?? x).join(', ') : '';
+          if (msg.address === '/trackname' && connectedDevices.size === 0) {
+              // Silently ignore to prevent log spam on startup
+            } else {
+              log(`OSC ← ${a}${args ? ' [' + args + ']' : ''}`, 'in');
+            }
+          break;
+        }
+        case 'device-ip': {
+          const ip = msg.ip || '—';
+          const type = msg.connectionType || (ip === '127.0.0.1' ? 'wired' : 'wifi');
+          updateConnectionBanner(type, ip);
+          break;
+        }
+        case 'device-mode': {
+          const ip = msg.ip || '—';
+          const type = msg.mode || (ip === '127.0.0.1' ? 'wired' : 'wifi');
+          updateConnectionBanner(type, ip);
+          break;
+        }
+        case 'device-version': {
+          if (msg.path) {
+            deviceVersions.set(msg.path, msg.version || '');
+            scanDevices();
+          }
+          break;
+        }
+        case 'device-connected':
+        case 'serial-open':
+        case 'serial-close':
+        case 'serial-error':
+          scanDevices();
+          break;
+        case 'ableton-connected':
+          updateM4LStatus(true);
+          log('✓ Ableton connected (heartbeat /hi)', 'out');
+          break;
+        case 'ableton-disconnected':
+          updateM4LStatus(false);
+          log('⚠️ Ableton disconnected (no /hi)', 'err');
+          break;
+      }
+    };
+  } catch (e) {
+    log(`✗ WebSocket init failed: ${e.message}`, 'err');
   }
-};
+}
 
 // Send track names for a specific device based on its device ID
 async function sendTrackNamesForDevice(deviceId) {
@@ -1199,6 +1258,8 @@ window.addEventListener('DOMContentLoaded', () => {
   scanDevices(); // Scan for devices on page load
   setInterval(scanDevices, 5000);
   checkDeviceStatus();
+  // Start WebSocket stream for serial/OSC and device IP/mode updates
+  initWebSocket();
 
   // Attach all button event listeners safely (inside DOMContentLoaded)
   const refreshBtn = document.getElementById('btnRefreshDevices');
@@ -1208,6 +1269,8 @@ window.addEventListener('DOMContentLoaded', () => {
       await scanDevices();
       log('✓ Device list refreshed', 'out');
     };
+
+  
   }
 
   const btnRefresh = document.getElementById('btnRefresh');
@@ -1372,6 +1435,7 @@ window.addEventListener('DOMContentLoaded', () => {
         const modal = document.getElementById('modalAddNetwork');
         if (modal) {
           modal.style.display = 'block';
+          loadWifiCredentials(); // Autofill saved credentials
           // Auto-scan for networks
           setTimeout(() => scanWiFiModal(), 200);
         }
@@ -1384,6 +1448,38 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   }
   
+  // --- WiFi Modal Logic ---
+  function loadWifiCredentials() {
+    const savedSsid = localStorage.getItem('tds8_wifi_ssid');
+    const savedPass = localStorage.getItem('tds8_wifi_pass');
+    if (savedSsid) {
+      const ssidInput = document.getElementById('ssidInput');
+      const ssidDropdown = document.getElementById('ssidDropdown');
+      if (ssidInput) ssidInput.value = savedSsid;
+      if (ssidDropdown) {
+        // Check if the saved SSID is already in the dropdown
+        let found = false;
+        for (let i = 0; i < ssidDropdown.options.length; i++) {
+          if (ssidDropdown.options[i].value === savedSsid) {
+            ssidDropdown.selectedIndex = i;
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          // If not found, show the manual input
+          ssidDropdown.value = '';
+          ssidInput.style.display = 'block';
+          ssidInput.value = savedSsid;
+        }
+      }
+    }
+    if (savedPass) {
+      const pwdInput = document.getElementById('pwd');
+      if (pwdInput) pwdInput.value = savedPass;
+    }
+  }
+
   // Save & Connect button handler (WiFi modal)
   const btnSaveNetwork = document.getElementById('btnSaveNetwork');
   if (btnSaveNetwork) btnSaveNetwork.onclick = async () => {
@@ -1393,30 +1489,46 @@ window.addEventListener('DOMContentLoaded', () => {
     
     let ssid = '';
     if (dropdown && dropdown.value && dropdown.value !== '') {
-      ssid = dropdown.value.trim();
-    } else if (manualInput && manualInput.value && manualInput.value !== '') {
+      ssid = dropdown.value;
+    } else if (manualInput) {
       ssid = manualInput.value.trim();
     }
     
     const password = pwdInput ? pwdInput.value : '';
     if (!ssid) { log('SSID is required', 'error'); return; }
     try {
-      // Save password to localStorage
-      if (password) localStorage.setItem('tds8_wifi_' + ssid, password);
-      log(`📡 Joining WiFi "${ssid}" on all devices…`, 'info');
-      const res = await fetch('/api/wifi-join', {
+      // Save credentials to localStorage for autofill
+      localStorage.setItem('tds8_wifi_ssid', ssid);
+      localStorage.setItem('tds8_wifi_pass', password);
+
+      log('💾 WiFi credentials saved to browser for autofill.', 'info');
+
+      // 1. Send WIFI_JOIN to all devices
+      log('📡 Sending WiFi credentials to all connected devices...', 'info');
+      const joinRes = await fetch('/api/wifi-join', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ ssid, password })
       });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j.error || 'join failed');
-      log('✓ WiFi credentials sent. Devices rebooting…', 'out');
+      const joinJson = await joinRes.json();
+      if (!joinRes.ok) throw new Error(joinJson.error || 'WIFI_JOIN command failed');
+      log('✓ Credentials sent.', 'out');
+
+      // 2. Send commands to switch to WiFi and reboot
+      log('🔄 Telling all devices to switch to WiFi mode and reboot...', 'info');
+      const switchRes = await fetch('/api/wifi-switch-all', { method: 'POST' });
+      const switchJson = await switchRes.json();
+      if (!switchRes.ok) throw new Error(switchJson.error || 'WiFi switch command failed');
+      
+      log('✓ WiFi switch command sent. Devices will disconnect and reboot.', 'out');
+      log('Please wait a moment for them to reconnect over WiFi.', 'info');
+
       // Close modal
       const modal = document.getElementById('modalAddNetwork');
       if (modal) modal.style.display = 'none';
+
     } catch (err) {
-      log(`✖ WiFi join failed: ${err.message}`, 'error');
+      log(`✖ WiFi setup failed: ${err.message}`, 'error');
     }
   };
 
