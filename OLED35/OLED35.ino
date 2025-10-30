@@ -43,8 +43,8 @@
 #include <WiFiClientSecure.h>
 
 // =======================  Firmware  =======================
-#define FW_VERSION "0.365"   // ← bump this when you publish a new firmware
-#define FW_BUILD "2025.10.21-multi-device"  // ← build identifier (date + feature)
+#define FW_VERSION "0.366"   // ← bump this when you publish a new firmware
+#define FW_BUILD "2025.10.29-multi-device"  // ← build identifier (date + feature)
 #define GITHUB_MANIFEST_URL "https://raw.githubusercontent.com/m1llipede/tds8/main/manifest.json"
 
 // =======================  OLED / I2C  ======================
@@ -508,7 +508,7 @@ void setup() {
   nextBeaconAt     = millis() + beaconPeriodMs;
 
   if (WiFi.status() == WL_CONNECTED) {
-    showQuickStartLoop();
+    showNetworkSplash(WiFi.localIP().toString());
   }
   
   // NOW set splash screen timer AFTER WiFi setup is complete
@@ -619,9 +619,9 @@ void loop() {
       }
     }
 
-    // Quick-Start once
+    // Quick-Start once (simplified): show ONLINE + IP on OLED 1 and logo on OLED 8
     if (!quickStartShown && WiFi.status() == WL_CONNECTED && !abletonBannerShown) {
-      showQuickStartLoop();
+      showNetworkSplash(WiFi.localIP().toString());
       quickStartShown = true;
     }
   }
@@ -801,8 +801,8 @@ void showNetworkSetup() {
 }
 
 void showNetworkSplash(const String& ip) {
-  const uint8_t i = 7;  // screen 8 (0-based)
-  tcaSelect(i);
+  // OLED 1 (index 0): Show ONLINE + IP
+  tcaSelect(0);
   display.invertDisplay(false);
   display.clearDisplay();
   display.setTextWrap(false);
@@ -837,57 +837,38 @@ void showNetworkSplash(const String& ip) {
 
   drawCentered("IP: " + ip, 1, 36);
   display.display();
-  delay(1500);
+
+  // OLED 8 (index 7): PlayOptix logo only
+  tcaSelect(7);
+  display.invertDisplay(false);
+  display.clearDisplay();
+  display.display();
+  delay(10);
+  display.setTextWrap(false);
+  display.setTextColor(SSD1306_WHITE);
+  display.drawBitmap(0, 0, playoptix_logo, LOGO_WIDTH, LOGO_HEIGHT, SSD1306_WHITE);
+  display.fillRect(0, 54, 128, 10, SSD1306_BLACK);
+  display.display();
 }
 
 void showAbletonConnectedAll(uint16_t ms) {
-  for (uint8_t i = 0; i < numScreens; i++) {
-    tcaSelect(i);
-    display.invertDisplay(false);
-    display.clearDisplay();
-    display.drawRect(0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1, SSD1306_WHITE);
-    drawLines(2, 15, "Ableton", "Connected", "");
-    display.display();
-    delay(0);
-  }
+  // Show Ableton Connected only on OLED 1 (index 0)
+  tcaSelect(0);
+  display.invertDisplay(false);
+  display.clearDisplay();
+  display.drawRect(0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1, SSD1306_WHITE);
+  drawLines(2, 15, "Ableton", "Connected", "");
+  display.display();
   if (ms) delay(ms);
   refreshAll();
 }
 
 void showWiFiConnecting() {
-  // Show "Connecting to WiFi..." on OLED 1
-  tcaSelect(0);
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  
-  // Center the text
-  String text = "Connecting to WiFi...";
-  int16_t x1, y1;
-  uint16_t w, h;
-  display.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
-  display.setCursor((SCREEN_WIDTH - w) / 2, (SCREEN_HEIGHT - h) / 2);
-  display.println(text);
-  
-  display.display();
+  // No-op (remove instruction/connecting screens)
 }
 
 void showWiFiRetrying() {
-  // Show "Retrying WiFi..." on OLED 1
-  tcaSelect(0);
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  
-  // Center the text
-  String text = "Retrying WiFi...";
-  int16_t x1, y1;
-  uint16_t w, h;
-  display.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
-  display.setCursor((SCREEN_WIDTH - w) / 2, (SCREEN_HEIGHT - h) / 2);
-  display.println(text);
-  
-  display.display();
+  // No-op (remove instruction/retry screens)
 }
 
 void showQuickStartLoop() {
@@ -1477,8 +1458,10 @@ void broadcastIP() {
   Udp.beginPacket(bcast, ipBroadcastPort); Udp.print(s); Udp.endPacket();
 
   // Send OSC /ipupdate to LAN broadcast (bridge listens on 0.0.0.0:9000)
+  // Args: ip (string), deviceID (int)
   OSCMessage m("/ipupdate");
   m.add(s.c_str());
+  m.add((int)deviceID);
   Udp.beginPacket(bcast, ipBroadcastPort); m.send(Udp); Udp.endPacket();
   delay(0);
   Serial.printf("SENT: /ipupdate %s\n", s.c_str());
