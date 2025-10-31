@@ -180,36 +180,6 @@ function initOSCListener() {
                 
                 wsBroadcast({ type: 'osc-received', from: `${fromIP}:${fromPort}`, address: oscMsg.address, args: oscMsg.args });
                 
-                // Handle /ipupdate from device (when it connects to WiFi)
-                if (oscMsg.address === "/ipupdate") {
-                    if (oscMsg.args.length > 0) {
-                        const newIP = oscMsg.args[0].value;
-                        const ssid = oscMsg.args.length > 1 ? oscMsg.args[1].value : null;
-                        
-                        console.log(`RECV: /ipupdate ${newIP}`);
-                        
-                        if (newIP && newIP !== deviceIP) {
-                            deviceIP = newIP;
-                            
-                            wsBroadcast({ 
-                                type: 'device-ip', 
-                                ip: deviceIP,
-                                ssid: ssid,
-                                connectionType: newIP === '127.0.0.1' ? 'wired' : 'wifi'
-                            });
-                            // Transparency log to UI when WiFi IP arrives
-                            if (newIP !== '127.0.0.1') {
-                              uiLog(`MODE: WIFI`);
-                              uiLog(`IP: ${newIP}`);
-                              uiLog(`OSC: Bridge listening ${OSC_LISTEN_PORT} (from M4L), sending ${M4L_PORT} (to M4L)`);
-                            }
-                            
-                            // Forward to M4L
-                            broadcastIPUpdate();
-                        }
-                    }
-                    return;
-                }
                 
                 // Handle /hi response to our /hello
                 if (oscMsg.address === "/hi") {
@@ -307,75 +277,6 @@ function initOSCListener() {
     return oscListener;
 }
 
-// OSC Listener on port 9000 for receiving /ipupdate from TDS-8 device
-let deviceListener = null;
-
-function initDeviceListener() {
-    if (!deviceListener) {
-        try {
-            deviceListener = new osc.UDPPort({
-                localAddress: "0.0.0.0",
-                localPort: 9000,
-                metadata: true
-            });
-            
-            deviceListener.on("message", (oscMsg) => {
-                // Only handle /ipupdate from device
-                if (oscMsg.address === "/ipupdate" && oscMsg.args.length > 0) {
-                    const newIP = oscMsg.args[0].value;
-                    const ssid = oscMsg.args.length > 1 ? oscMsg.args[1].value : null;
-                    
-                    console.log(`RECV: /ipupdate ${newIP} (from device)`);
-                    
-                    if (newIP) {
-                        const changed = newIP !== deviceIP;
-                        deviceIP = newIP;
-                        
-                        const connectionType = newIP === '127.0.0.1' ? 'wired' : 'wifi';
-                        console.log(`📡 Broadcasting device-ip to UI: ${connectionType} @ ${deviceIP}`);
-                        
-                        // Always broadcast to UI (even if IP didn't change, UI might need update)
-                        wsBroadcast({ 
-                            type: 'device-ip', 
-                            ip: deviceIP,
-                            ssid: ssid,
-                            connectionType: connectionType
-                        });
-                        
-                        // Forward to M4L only if IP changed
-                        if (changed) {
-                            broadcastIPUpdate();
-                            
-                            // Send /reannounce to M4L to request track names
-                            setTimeout(() => {
-                                try {
-                                    sendOSC('/reannounce', []);
-                                    console.log('SENT: /reannounce (after WiFi connection)');
-                                } catch (err) {
-                                    console.error('Failed to send /reannounce:', err.message);
-                                }
-                            }, 2000);
-                        }
-                    }
-                }
-            });
-            
-            deviceListener.on("ready", () => {
-                console.log(`📡 Device Listener: Ready on port 9000 (receives /ipupdate from TDS-8)`);
-            });
-            
-            deviceListener.on("error", (err) => {
-                console.error("Device listener error:", err.message);
-            });
-            
-            deviceListener.open();
-        } catch (err) {
-            console.error("Device listener init error:", err.message);
-        }
-    }
-    return deviceListener;
-}
-
 // Start OSC sender and listener immediately
 console.log('\n========== OSC INITIALIZATION ==========');
 console.log('Calling initOSC()...');
@@ -385,9 +286,6 @@ console.log('OSC Sender returned:', oscSender ? 'object' : 'null');
 console.log('Calling initOSCListener()...');
 const oscReceiver = initOSCListener(); // Initialize OSC listener (port 8000 - from M4L)
 console.log('OSC Listener returned:', oscReceiver ? 'object' : 'null');
-
-console.log('Calling initDeviceListener()...');
-initDeviceListener(); // Initialize device listener (port 9000 - from TDS-8)
 
 // Wait a moment for ports to open, then verify
 setTimeout(() => {
@@ -417,22 +315,6 @@ setTimeout(() => {
 }, 1000);
 
 console.log('========================================\n');
-// Function to broadcast IP update to M4L
-function broadcastIPUpdate() {
-    try {
-        const port = initOSC();
-        if (!port) return;
-        
-        const message = {
-            address: "/ipupdate",
-            args: [{ type: "s", value: deviceIP }]
-        };
-        console.log(`SENT: /ipupdate ${deviceIP} (to M4L on port ${M4L_PORT})`);
-        port.send(message, M4L_IP, M4L_PORT);
-    } catch (err) {
-        console.error("Error:", err.message);
-    }
-}
 
 app.use(express.json({ limit: '10mb' }));
 app.use(morgan('dev'));
@@ -831,24 +713,17 @@ app.post('/api/connect', async (req, res) => {
     });
     
     // For first device, also set legacy global variables for backward compatibility
-    if (devices.length === 1) {
+    if (devices.length > 0) {
       serial = newSerial;
       serialPath = desired;
       serialBuf = device.buffer;
       deviceIP = '127.0.0.1';
-      
-      // Broadcast IP update to M4L
-      setTimeout(() => broadcastIPUpdate(), 500);
     }
     
-    // Send DEVICE_ID command to set track offset
-    setTimeout(() => {
-      sendToDevice(deviceId, `DEVICE_ID ${deviceId}\n`);
-      sendToDevice(deviceId, 'VERSION\n');
-      console.log(`✓ Connected: ${desired} → Device ID ${deviceId} (Tracks ${deviceId * 8 + 1}-${(deviceId + 1) * 8})`);
+    sendToDevice(deviceId, `DEVICE_ID ${deviceId}\n`);
+    sendToDevice(deviceId, 'VERSION\n');
+    console.log(`✓ Connected: ${desired} → Device ID ${deviceId} (Tracks ${deviceId * 8 + 1}-${(deviceId + 1) * 8})`);
 
-    }, 1000);
-    
     // Broadcast device status to UI (wired mode)
     deviceIP = '127.0.0.1';
     wsBroadcast({
@@ -1005,126 +880,24 @@ app.post('/api/disconnect', async (req, res) => {
 app.post('/api/comm-mode', (req, res) => {
   try {
     const mode = String((req.body && req.body.mode) || '').toLowerCase();
-    if (!['wired','wifi'].includes(mode)) throw new Error('mode must be wired or wifi');
-    
-    if (mode === 'wired') {
-      // Send WIRED_ONLY true to all devices
-      if (devices.length > 0) {
-        console.log(`📢 Broadcasting WIRED_ONLY true to all ${devices.length} devices`);
-        sendToAll('WIRED_ONLY true\n');
-      } else {
-        send('WIRED_ONLY true\n');
-      }
-    } else { 
-      // Send WIRED_ONLY false to all devices
-      if (devices.length > 0) {
-        console.log(`📢 Broadcasting WIRED_ONLY false to all ${devices.length} devices`);
-        sendToAll('WIRED_ONLY false\n');
-        // Also send WIFI_ON to all devices
-        sendToAll('WIFI_ON\n');
-      } else {
-        send('WIRED_ONLY false\n');
-        send('WIFI_ON\n');
-      }
+    if (mode !== 'wired') throw new Error('WiFi mode is disabled in this build');
+    if (devices.length > 0) {
+      console.log(`📢 Enforcing WIRED_ONLY true for ${devices.length} device(s)`);
+      sendToAll('WIRED_ONLY true\n');
+    } else if (serial && serial.isOpen) {
+      send('WIRED_ONLY true\n');
     }
-    res.json({ ok: true, mode });
-  } catch (e) { 
-    console.error(`Error:`, e.message);
-    res.status(400).json({ error: e.message }); 
+    return res.json({ ok: true, mode: 'wired' });
+  } catch (e) {
+    console.error('comm-mode error:', e.message);
+    return res.status(400).json({ error: e.message });
   }
 });
 
 // Wi-Fi join + Windows scan
-app.post('/api/wifi-join', (req, res) => {
-  try {
-    const { ssid, password, deviceId } = req.body || {};
-    if (!ssid) throw new Error('Missing ssid');
-    const esc = s => '"' + String(s).replace(/"/g, '\\"') + '"';
-    const cmd = `WIFI_JOIN ${esc(ssid)} ${esc(password || '')}`;
-    
-    // Send WiFi credentials to ALL connected devices
-    if (devices.length > 0) {
-      console.log(`📡 Sending WiFi join to all ${devices.length} devices`);
-      uiLog(`[WIFI] Sending credentials for "${ssid}"...`);
-      sendToAll(cmd + '\n');
-      
-      // Wait a moment for credentials to be saved before rebooting
-      setTimeout(() => {
-        uiLog('[WIFI] Switching to WiFi mode...');
-        sendToAll('WIRED_ONLY false\n');
-        
-        setTimeout(() => {
-          uiLog('[WIFI] Rebooting devices to connect...');
-          sendToAll('REBOOT\n');
-        }, 250);
-      }, 500);
-    } else if (serial && serial.isOpen) {
-      send(cmd + '\n');
-      send('WIRED_ONLY false\n');
-      send('REBOOT\n');
-    } else {
-      throw new Error('No devices connected - please connect TDS-8 devices first');
-    }
-    
-    res.json({ ok: true });
-  } catch (e) { 
-    console.error(`❌ WiFi join error:`, e.message);
-    res.status(400).json({ error: e.message }); 
-  }
-});
+// WiFi endpoints removed (wired-only build)
 
-app.get('/api/wifi-scan', (_req, res) => {
-  const isMac = process.platform === 'darwin';
-  const isWin = process.platform === 'win32';
-  
-  if (!isMac && !isWin) {
-    return res.status(500).json({ error: 'WiFi scan not supported on this platform' });
-  }
-  
-  const scanCmd = isMac 
-    ? 'networksetup -listpreferredwirelessnetworks en0 2>/dev/null'
-    : 'netsh wlan show networks mode=Bssid';
-  
-  exec(scanCmd, { windowsHide: true, timeout: 10000 }, (err, stdout) => {
-    if (err) { 
-      console.error('WiFi scan error:', err);
-      res.status(500).json({ error: err.message }); 
-      return;
-    }
-    
-    parseWiFiOutput(stdout, isMac, res);
-  });
-});
-
-function parseWiFiOutput(stdout, isMac, res) {
-  console.log('WiFi scan raw output:', stdout);
-  const ssids = [];
-  
-  if (isMac) {
-    // Parse Mac networksetup output: "Preferred networks on en0:\n\t\tSSID1\n\t\tSSID2"
-    stdout.split(/\r?\n/).forEach(line => {
-      const trimmed = line.trim();
-      if (trimmed && !trimmed.startsWith('Preferred') && !trimmed.includes(':')) {
-        if (!ssids.includes(trimmed)) ssids.push(trimmed);
-      }
-    });
-  } else {
-    // Parse Windows netsh output
-    stdout.split(/\r?\n/).forEach(line => {
-      const m = line.match(/^\s*SSID\s+\d+\s*:\s*(.+)$/i);
-      if (m) { 
-        const name = m[1].trim(); 
-        if (name && !ssids.includes(name)) {
-          console.log(`Found SSID: "${name}"`);
-          ssids.push(name); 
-        }
-      }
-    });
-  }
-  
-  console.log(`📡 WiFi scan complete: ${ssids.length} networks found:`, ssids);
-  res.json({ ok: true, ssids });
-}
+// WiFi scan removed (wired-only build)
 
 // GET /tracks - Return current track names for Ableton M4L
 // Persist names to disk so they survive server restarts
@@ -1316,22 +1089,16 @@ app.post('/api/send', (req, res) => {
         if (upperCmd.startsWith('WIRED_ONLY')) {
             const parts = cmd.trim().split(/\s+/);
             const arg = parts.length >= 2 ? parts[1] : undefined;
-            if (arg === undefined) {
-                throw new Error("Missing argument. Use: WIRED_ONLY true|false");
+            if (!/^(true|false)$/i.test(String(arg || ''))) {
+                throw new Error('Invalid argument. Use: WIRED_ONLY true|false');
             }
-            if (!/^(true|false)$/i.test(arg)) {
-                throw new Error("Invalid argument. Use: WIRED_ONLY true|false");
+            if (/^false$/i.test(arg)) {
+                throw new Error('WiFi mode is disabled in this build');
             }
             if (devices.length === 0) throw new Error('No devices connected');
-            console.log(`📢 Broadcasting WIRED_ONLY ${arg} to all ${devices.length} devices`);
-            sendToAll(`WIRED_ONLY ${arg}\n`);
-            // Transparency log to UI
-            const mode = /^true$/i.test(arg) ? 'WIRED' : 'WIFI';
-            const ip = mode === 'WIRED' ? '127.0.0.1' : (deviceIP || 'pending…');
-            uiLog(`MODE: ${mode}`);
-            uiLog(`IP: ${ip}`);
-            uiLog(`OSC: Bridge listening ${OSC_LISTEN_PORT} (from M4L), sending ${M4L_PORT} (to M4L)`);
-            return res.json({ ok: true, message: `WIRED_ONLY ${arg} sent to all devices` });
+            console.log(`📢 Enforcing WIRED_ONLY true for all ${devices.length} devices`);
+            sendToAll('WIRED_ONLY true\n');
+            return res.json({ ok: true, message: 'WIRED_ONLY true sent to all devices' });
         }
 
         // Handle /reannounce command (send OSC to M4L)
@@ -1428,21 +1195,14 @@ app.post('/api/osc-send', (req, res) => {
   }
 });
 
-// Broadcast IP update to M4L
-app.post('/api/broadcast-ip', (req, res) => {
-  try {
-    broadcastIPUpdate();
-    res.json({ ok: true, message: 'Broadcast sent to port 9000' });
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
+// Broadcast IP endpoint removed (wired-only build)
 
 // Get current device status
 app.get('/api/device-status', (req, res) => {
-  const connectionType = deviceIP === '127.0.0.1' ? 'wired' : (deviceIP ? 'wifi' : 'none');
   res.json({ 
-    ok: true, 
-    ip: deviceIP || '—',
-    connectionType: connectionType
+    ok: true,
+    ip: '127.0.0.1',
+    connectionType: 'wired'
   });
 });
 
@@ -1522,61 +1282,108 @@ app.get('/api/ota-check', async (req, res) => {
 // Firmware — load a feed of versions (optional)
 
 // New endpoint to switch all devices to WiFi mode
-app.post('/api/wifi-switch-all', async (req, res) => {
-  try {
-    console.log('Broadcasting WiFi switch to all devices...');
-    sendToAll('WIRED_ONLY false\n');
-    sendToAll('WIFI_ON\n');
-    // Add a small delay before rebooting to ensure the command is processed
-    setTimeout(() => {
-      sendToAll('REBOOT\n');
-    }, 500);
-    res.json({ ok: true, message: 'WiFi switch and reboot commands sent to all devices.' });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
+// WiFi switch endpoint removed (wired-only build)
 
 // Firmware — start OTA from a manifest - updated for multi-device support
 app.post('/api/ota-update', async (req, res) => {
+  // Disabled in wired-only build
+  return res.status(501).json({ ok: false, error: 'WiFi/OTA is disabled in this build' });
+});
+
+// Flash firmware over USB using esptool (wired-only)
+app.post('/api/flash', async (req, res) => {
   try {
-    const manifestUrl = (req.body && req.body.manifest) || OTA_MANIFEST_URL;
-    if (!manifestUrl) throw new Error('No manifest URL provided');
-    const mPath = await fetchToTemp(manifestUrl);
-    const manifest = JSON.parse(await fs.promises.readFile(mPath, 'utf8'));
-    if (!manifest.url) throw new Error('Manifest missing url');
-    
-    // Send OTA commands to all connected devices
-    if (devices.length > 0) {
-      console.log(`📡 Broadcasting OTA update to all ${devices.length} devices`);
-      sendToAll('WIRED_ONLY false\n');
-      sendToAll('WIFI_ON\n');
-      sendToAll(`OTA_URL ${manifest.url}\n`);
-    } else {
-      send('WIRED_ONLY false\n');
-      send('WIFI_ON\n');
-      send(`OTA_URL ${manifest.url}\n`);
+    const { url, manifest, deviceId, path: portPathOverride } = req.body || {};
+    let fwUrl = url;
+    if (!fwUrl && manifest) {
+      try {
+        const mPath = await fetchToTemp(manifest);
+        const man = JSON.parse(await fs.promises.readFile(mPath, 'utf8'));
+        fwUrl = man && man.url ? man.url : null;
+      } catch (e) {
+        throw new Error('Failed to read manifest: ' + e.message);
+      }
     }
-    
-    res.json({ ok: true, url: manifest.url });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+    if (!fwUrl) throw new Error('Missing firmware url or manifest');
+
+    // Decide which port to flash
+    let targetDevice = null;
+    if (typeof deviceId === 'number') {
+      targetDevice = devices.find(d => d.id === deviceId || d.deviceID === deviceId) || null;
+    }
+    let portPath = portPathOverride || (targetDevice ? targetDevice.path : (devices[0] && devices[0].path) || serialPath);
+    if (!portPath) throw new Error('No connected device to flash');
+
+    // Download firmware to temp
+    const fwPath = await fetchToTemp(fwUrl);
+
+    // Close serial if open on this port
+    try {
+      if (targetDevice && targetDevice.serial && targetDevice.serial.isOpen) {
+        await new Promise((resolve, reject) => targetDevice.serial.close(err => err ? reject(err) : resolve()));
+      } else if (serial && serial.isOpen && serialPath === portPath) {
+        await new Promise((resolve, reject) => serial.close(err => err ? reject(err) : resolve()));
+      }
+    } catch {}
+
+    // Try python/esptool runners in order
+    const runners = [
+      `python -m esptool --chip esp32c3 --port ${portPath} --baud 921600 write_flash -z 0x10000 "${fwPath}"`,
+      `py -m esptool --chip esp32c3 --port ${portPath} --baud 921600 write_flash -z 0x10000 "${fwPath}"`,
+      `python3 -m esptool --chip esp32c3 --port ${portPath} --baud 921600 write_flash -z 0x10000 "${fwPath}"`,
+      `esptool.py --chip esp32c3 --port ${portPath} --baud 921600 write_flash -z 0x10000 "${fwPath}"`
+    ];
+
+    let lastErr = null;
+    for (const cmd of runners) {
+      try {
+        uiLog(`[FLASH] Running: ${cmd}`);
+        await new Promise((resolve, reject) => {
+          exec(cmd, { windowsHide: true, timeout: 240000 }, (err, stdout, stderr) => {
+            if (stdout) uiLog(stdout);
+            if (stderr) uiLog(stderr);
+            if (err) return reject(err);
+            resolve();
+          });
+        });
+        uiLog('[FLASH] Completed successfully. Device will reboot.');
+        return res.json({ ok: true });
+      } catch (e) {
+        lastErr = e;
+        uiLog(`[FLASH] Failed with runner: ${e.message}`);
+        continue;
+      }
+    }
+    throw new Error(lastErr ? lastErr.message : 'Unknown flashing error');
+  } catch (e) {
+    console.error('Flash error:', e);
+    return res.status(400).json({ ok: false, error: e.message });
+  }
 });
 
 // -------- Utils --------
-async function fetchToTemp(url) {
-  const { request } = await (url.startsWith('https:') ? import('node:https') : import('node:http'));
-  const tmp = path.join(require('os').tmpdir(), 'tds8-' + Date.now() + '-' + Math.random().toString(16).slice(2));
-  await new Promise((resolve, reject) => {
-    const req = request(url, resp => {
-      if (resp.statusCode < 200 || resp.statusCode >= 300) { reject(new Error('HTTP ' + resp.statusCode)); return; }
+async function fetchToTemp(url, redirects = 5) {
+  const isHttps = url.startsWith('https:');
+  const mod = await (isHttps ? import('node:https') : import('node:http'));
+  return await new Promise((resolve, reject) => {
+    const req = mod.request(url, resp => {
+      // Follow redirects (e.g., GitHub release asset -> S3)
+      if (resp.statusCode && resp.statusCode >= 300 && resp.statusCode < 400 && resp.headers && resp.headers.location) {
+        if (redirects <= 0) { reject(new Error('Too many redirects')); return; }
+        const nextUrl = new URL(resp.headers.location, url).toString();
+        resp.resume(); // discard
+        fetchToTemp(nextUrl, redirects - 1).then(resolve).catch(reject);
+        return;
+      }
+      if (!resp.statusCode || resp.statusCode < 200 || resp.statusCode >= 300) { reject(new Error('HTTP ' + (resp.statusCode || 'ERR'))); return; }
+      const tmp = path.join(require('os').tmpdir(), 'tds8-' + Date.now() + '-' + Math.random().toString(16).slice(2));
       const f = fs.createWriteStream(tmp);
       resp.pipe(f);
-      f.on('finish', () => f.close(resolve));
+      f.on('finish', () => f.close(() => resolve(tmp)));
     });
     req.on('error', reject);
     req.end();
   });
-  return tmp;
 }
 
 function compareVersions(a, b) {
@@ -1591,10 +1398,8 @@ wss.on('connection', ws => {
   ws.send(JSON.stringify({ type: 'hello', port: serialPath, baud: BAUD }));
   try {
     const msg1 = `OSC: Bridge listening ${OSC_LISTEN_PORT} (from M4L), sending ${M4L_PORT} (to M4L)`;
-    const msg2 = `Device Listener: 0.0.0.0:9000 (receives /ipupdate from TDS-8)`;
     const msg3 = `OSC Sender: 127.0.0.1:9001 -> ${M4L_IP}:${M4L_PORT}`;
     ws.send(JSON.stringify({ type: 'serial-data', data: msg1 }));
-    ws.send(JSON.stringify({ type: 'serial-data', data: msg2 }));
     ws.send(JSON.stringify({ type: 'serial-data', data: msg3 }));
   } catch {}
 });

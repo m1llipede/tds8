@@ -132,12 +132,15 @@ select.input{cursor:pointer}
       <!-- Right Column - Serial Monitor -->
       <div class="right-col">
         <div class="card flex serial-card">
-          <div class="hdr">
-            <h1>📟 Serial Monitor</h1>
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-left:auto;cursor:pointer">
-              <input type="checkbox" id="autoScroll" checked style="cursor:pointer"/>
-              Auto-scroll
-            </label>
+          <div class="hdr" style="display:flex;align-items:center">
+            <h1 style="margin:0">📟 Serial Monitor</h1>
+            <div style="display:flex;align-items:center;gap:10px;margin-left:auto">
+              <span style="font-size:11px;color:#fff;opacity:0.9">v103025-9</span>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                <input type="checkbox" id="autoScroll" checked style="cursor:pointer"/>
+                Auto-scroll
+              </label>
+            </div>
           </div>
           <div class="body flex">
             <div id="log" class="log"></div>
@@ -153,7 +156,7 @@ select.input{cursor:pointer}
             <div style="margin-top:12px">
               <div style="font-size:12px;font-weight:600;color:#374151;text-align:center;margin-bottom:6px">TDS-8 Connection</div>
               <div style="display:flex;gap:10px;align-items:center;justify-content:center">
-                <select id="connectionTypeSelect" class="input" style="padding:6px 10px;width:140px">
+                <select id="connectionTypeSelect" class="input" style="padding:6px 10px;width:140px;display:none">
                   <option value="wired">Wired (USB)</option>
                   <option value="wifi">WiFi</option>
                 </select>
@@ -172,6 +175,16 @@ select.input{cursor:pointer}
               <div><code>/hello</code></div>
               <div><code>/trackname index "Name" actualTrack</code> - Example: <code>/trackname 0 "Kick" 0</code></div>
               <div><code>/ipupdate</code> - device IP update (WiFi mode)</div>
+            </div>
+            <div class="divider"></div>
+            <div id="fwBox">
+              <div style="font-weight:600;margin-bottom:6px">⬇️ Firmware Update (USB)</div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <input id="fwUrl" class="input" placeholder="Paste GitHub firmware URL (.bin)" style="flex:1;min-width:260px;font-size:12px;padding:6px 8px" autocomplete="off" autocapitalize="off" spellcheck="false"/>
+                <select id="fwDeviceSelect" class="input" style="width:180px;font-size:12px;padding:6px 8px"></select>
+                <button id="btnFlash" class="btn secondary sm">Flash</button>
+              </div>
+              <div style="font-size:11px;color:#6b7280;margin-top:6px">Accepts direct .bin URLs (GitHub release assets or raw.githubusercontent.com). Device will reboot after flashing.</div>
             </div>
           </div>
         </div>
@@ -1067,6 +1080,64 @@ function sendCommand() {
   $('#cmd').value = '';
 }
 
+// ----- Firmware (USB flash) -----
+function buildFirmwareDeviceSelect() {
+  const sel = document.getElementById('fwDeviceSelect');
+  if (!sel) return;
+  sel.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  const any = document.createElement('option');
+  any.value = 'auto';
+  any.textContent = connectedDevices.size > 0 ? 'Auto (first connected)' : 'No devices connected';
+  frag.appendChild(any);
+  if (connectedDevices.size > 0) {
+    Array.from(connectedDevices.entries()).forEach(([path, info]) => {
+      const opt = document.createElement('option');
+      opt.value = 'id:' + info.deviceId;
+      opt.textContent = `Device ${info.deviceId + 1} • ${path}`;
+      frag.appendChild(opt);
+    });
+  }
+  sel.appendChild(frag);
+  const btn = document.getElementById('btnFlash');
+  if (btn) btn.disabled = connectedDevices.size === 0;
+}
+
+async function flashFirmware() {
+  try {
+    const urlInput = document.getElementById('fwUrl');
+    const sel = document.getElementById('fwDeviceSelect');
+    const btn = document.getElementById('btnFlash');
+    if (!urlInput || !sel) return;
+    const url = (urlInput.value || '').trim();
+    if (!url) { log('✗ Firmware URL required', 'err'); return; }
+    const body = {};
+    if (/\.json($|\?)/i.test(url)) body.manifest = url; else body.url = url;
+    if (sel.value && sel.value.startsWith('id:')) {
+      const id = parseInt(sel.value.slice(3), 10);
+      if (!Number.isNaN(id)) body.deviceId = id;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = 'Flashing…'; }
+    log('⬇️ Downloading firmware and flashing device…', 'info');
+    const res = await fetch('/api/flash', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const j = await res.json();
+    if (res.ok && j && j.ok) {
+      log('✓ Flash started/completed. Device will reboot.', 'out');
+    } else {
+      log(`✗ Flash failed: ${j && j.error ? j.error : 'Unknown error'}`, 'err');
+    }
+  } catch (e) {
+    log(`✗ Flash error: ${e.message}`, 'err');
+  } finally {
+    const btn = document.getElementById('btnFlash');
+    if (btn) { btn.disabled = false; btn.textContent = 'Flash'; }
+  }
+}
+
 
 // ----- WebSocket -----
 (() => {
@@ -1084,6 +1155,8 @@ function sendCommand() {
       scanDevices();
       // Check device status after serial opens
       setTimeout(() => checkDeviceStatus(), 1000);
+      // Update firmware device selector
+      setTimeout(buildFirmwareDeviceSelect, 500);
     }
     
     // Handle serial port close (device disconnected) - updated for multi-device support
@@ -1118,6 +1191,7 @@ function sendCommand() {
       // Always refresh device list and rebuild track grid
       scanDevices();
       buildTrackGrid();
+      buildFirmwareDeviceSelect();
     }
     
     // Handle multi-device connection
@@ -1128,6 +1202,7 @@ function sendCommand() {
         }
       });
       scanDevices();
+      buildFirmwareDeviceSelect();
     }
     if (msg.type === 'serial-error') log(`✗ Serial error: ${msg.message}`, 'err');
     if (msg.type === 'device-version') {
@@ -1352,25 +1427,9 @@ window.addEventListener('DOMContentLoaded', () => {
   // if (btnCloseWifi) btnCloseWifi.onclick = () => $('#modalWifi').style.display = 'none';
 
   // Firmware buttons
-  const btnFirmwareTop = document.getElementById('btnFirmwareTop');
-  if (btnFirmwareTop) {
-    btnFirmwareTop.onclick = () => {
-      $('#modalFirmware').style.display = 'block';
-      if (currentDevice) {
-        const btnCheck = $('#btnCheck');
-        if (btnCheck) btnCheck.click();
-      }
-    };
-  }
-
-  const btnCloseFirmware = document.getElementById('btnCloseFirmware');
-  if (btnCloseFirmware) btnCloseFirmware.onclick = () => $('#modalFirmware').style.display = 'none';
-
-  const btnCheck = document.getElementById('btnCheck');
-  if (btnCheck) btnCheck.onclick = checkFirmware;
-
-  const btnOta = document.getElementById('btnOta');
-  if (btnOta) btnOta.onclick = startOTA;
+  buildFirmwareDeviceSelect();
+  const btnFlash = document.getElementById('btnFlash');
+  if (btnFlash) btnFlash.onclick = flashFirmware;
 
   // Command input
   const btnSend = document.getElementById('btnSend');
