@@ -135,7 +135,7 @@ select.input{cursor:pointer}
           <div class="hdr" style="display:flex;align-items:center">
             <h1 style="margin:0">📟 Serial Monitor</h1>
             <div style="display:flex;align-items:center;gap:10px;margin-left:auto">
-              <span style="font-size:11px;color:#fff;opacity:0.9">v103025-9</span>
+              <span style="font-size:11px;color:#fff;opacity:0.9">v103025-16</span>
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
                 <input type="checkbox" id="autoScroll" checked style="cursor:pointer"/>
                 Auto-scroll
@@ -724,6 +724,26 @@ async function saveTracksToBridge() {
 
 // All button handlers moved to DOMContentLoaded
 
+async function fetchTrackNames() {
+  try {
+    const res = await fetch('/api/tracknames');
+    const data = await res.json();
+    if (data.ok && Array.isArray(data.names)) {
+      for (let i = 0; i < data.names.length; i++) {
+        const el = document.getElementById('tname' + i);
+        if (el && data.names[i]) {
+          el.value = data.names[i];
+        }
+      }
+      log('✓ Loaded track names from bridge', 'info');
+    } else {
+      log('✗ Failed to load track names from bridge', 'err');
+    }
+  } catch (err) {
+    log(`✗ Error fetching track names: ${err.message}`, 'err');
+  }
+}
+
 async function refreshFromAbleton() {
   if (!currentDevice) {
     log('✗ Please connect to TDS-8 device first', 'err');
@@ -748,9 +768,7 @@ async function refreshFromAbleton() {
   } catch (err) {
     log(`✗ Error: ${err.message}`, 'err');
   }
-  setTimeout(async () => {
-    await loadStoredTrackNames();
-  }, 400);
+  setTimeout(fetchTrackNames, 400);
 }
 
 // ---- WebSocket: stream logs and state from Bridge ----
@@ -766,6 +784,17 @@ function initWebSocket() {
       try { msg = JSON.parse(evt.data); } catch { return; }
       if (!msg || !msg.type) return;
       switch (msg.type) {
+        case 'device-connected':
+          log(`🔌 Auto-connected: ${msg.path} → Device ${msg.deviceId + 1} (Tracks ${msg.trackRange})`, 'info');
+          connectedDevices.set(msg.path, { 
+            name: `TDS-8 #${msg.deviceId + 1}`,
+            path: msg.path, 
+            deviceId: msg.deviceId, 
+            trackRange: msg.trackRange 
+          });
+          scanDevices();
+          buildTrackGrid();
+          break;
         case 'serial-data':
           if (msg.data) log(String(msg.data));
           break;
@@ -804,7 +833,6 @@ function initWebSocket() {
           }
           break;
         }
-        case 'device-connected':
         case 'serial-open':
         case 'serial-close':
         case 'serial-error':
@@ -1205,6 +1233,18 @@ async function flashFirmware() {
       buildFirmwareDeviceSelect();
     }
     if (msg.type === 'serial-error') log(`✗ Serial error: ${msg.message}`, 'err');
+    if (msg.type === 'device-connected') {
+      // Backend auto-connected a device: reflect this in UI
+      if (msg.path && typeof msg.deviceId === 'number') {
+        connectedDevices.set(msg.path, { deviceId: msg.deviceId, trackRange: msg.trackRange || `${msg.deviceId * 8 + 1}-${(msg.deviceId + 1) * 8}` });
+        currentDevice = msg.path;
+        updateFooterSerial(null);
+        updateConnectionStatus(true);
+        scanDevices();
+        buildTrackGrid();
+        buildFirmwareDeviceSelect();
+      }
+    }
     if (msg.type === 'device-version') {
       log(`Device version: ${msg.version}`, 'info');
       // Store version for display - use path if provided, otherwise currentDevice

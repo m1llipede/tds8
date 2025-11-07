@@ -1,25 +1,23 @@
 /**********************************************************************
-  TDS-8 (Track Display Strip - 8 channels)  — v35 WIFI & MULTI-DEVICE
+  TDS-8 (Track Display Strip - 8 channels)  — v32 OFFSET SUPPORT
   
-  NEW IN V35:
-  - WiFi IP updates in bridge dashboard
-  - Dual /reannounce for reliability
-  - Track numbers always shown at bottom
-  - Removed false "Ableton Disconnected" messages
+  NEW IN V32:
   - Track offset support (show tracks 1-8, 9-16, 17-24, etc.)
   - Display actual track numbers at bottom of OLEDs
   - 3-parameter /trackname command: <idx> <name> <actualTrack>
   - Blank displays on startup (no default "Track N" text)
   
-  FEATURES:
+  V32 FEATURES:
   - Defaults to WIRED MODE (USB-C) - no WiFi required
   - Serial commands for full control via desktop bridge
   - Optional WiFi mode (enable via serial/web command)
   - Consumer-friendly plug-and-play experience
   - GitHub OTA firmware updates
+  
+  FEATURES:
   - 8x SSD1306 via TCA9548A (manual tcaSelect)
-  - Serial: /trackname, /activetrack, VERSION, WIRED_ONLY, WIFI_ON, etc.
-  - OSC (WiFi mode): /trackname, /activetrack, /reannounce
+  - Serial: /trackname, /activetrack, /ping, VERSION, WIRED_ONLY, WIFI_ON, etc.
+  - OSC (WiFi mode): /trackname, /activetrack, /ping, /reannounce
   - Web UI (WiFi mode): http://tds8.local
   - OTA updates from GitHub releases
 **********************************************************************/
@@ -43,8 +41,8 @@
 #include <WiFiClientSecure.h>
 
 // =======================  Firmware  =======================
-#define FW_VERSION "0.366"   // ← bump this when you publish a new firmware
-#define FW_BUILD "2025.10.29-multi-device"  // ← build identifier (date + feature)
+#define FW_VERSION "0.32"   // ← bump this when you publish a new firmware
+#define FW_BUILD "2025.10.14-offset"  // ← build identifier (date + feature)
 #define GITHUB_MANIFEST_URL "https://raw.githubusercontent.com/m1llipede/tds8/main/manifest.json"
 
 // =======================  OLED / I2C  ======================
@@ -56,34 +54,7 @@
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-// =======================  State Machine for Startup =======================
-enum AppState {
-  STATE_STARTUP_SPLASH,
-  STATE_INSTRUCTIONS,
-  STATE_RUNNING
-};
-AppState currentState = STATE_STARTUP_SPLASH;
-unsigned long stateTransitionTime = 0;
-
 // =======================  Graphics / Bitmaps  ==============
-void tcaSelect(uint8_t i); // forward declaration
-// Show TDS-8 and Playoptix logo splash on all screens for 3 seconds
-void showLogosSplash() {
-  for (uint8_t i = 0; i < 8; ++i) {
-    tcaSelect(i);
-    display.clearDisplay();
-    display.setTextSize(2);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(10, 8);
-    display.println("TDS-8");
-    display.setTextSize(1);
-    display.setCursor(10, 40);
-    display.println("by Playoptix");
-    display.display();
-  }
-  delay(3000);
-}
-
 // PlayOptix logo - 128x64px (full display)
 const unsigned char playoptix_logo [] PROGMEM = {
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -172,20 +143,10 @@ const int numScreens = 8;
 String trackNames[numScreens] = {"", "", "", "", "", "", "", ""}; // Start blank
 int actualTrackNumbers[numScreens] = {0, 1, 2, 3, 4, 5, 6, 7}; // Actual track numbers for offset support
 int activeTrack = -1;
-bool abletonConnected = false;
-bool showingDisconnectMessage = false;
-unsigned long heartbeatFlashUntil = 0;  // Show heartbeat dot until this time
 
 // ==================  WIRED MODE (NEW)  ====================
 bool wiredOnly = true;  // DEFAULT: wired mode, WiFi OFF
 bool wifiEnabled = false;
-
-// ==================  MULTI-DEVICE SUPPORT  ====================
-uint8_t deviceID = 0;  // Device ID (0-3), determines track offset
-// Device 0 = tracks 0-7 (displayed as 1-8)
-// Device 1 = tracks 8-15 (displayed as 9-16)
-// Device 2 = tracks 16-23 (displayed as 17-24)
-// Device 3 = tracks 24-31 (displayed as 25-32)
 
 // ==================  Network / services  ==================
 Preferences prefs;
@@ -226,10 +187,21 @@ unsigned long nextBeaconAt      = 0;
 const unsigned long beaconPeriodMs = 5000;
 const unsigned long beaconWindowMs = 60000;
 
-// UI state tracking
+// Ableton heartbeat via /ping
+volatile bool m4lConnected    = false;   // true while pings arrive
+unsigned long connectedUntil  = 0;       // drop after timeout
 bool          abletonBannerShown = false;
 bool          quickStartShown    = false;
-volatile bool wantAbletonBanner = false;
+
+// Flash indicator on screen 1 for /ping
+volatile unsigned long pingFlashUntil = 0;
+volatile bool          wantAbletonBanner = false;
+volatile bool          wantPingFlash     = false;
+
+// Defer /pong send out of UDP handler
+volatile bool          WANT_PONG = false;
+IPAddress              PONG_IP;
+uint16_t               PONG_PORT = 0;
 
 // ===================  Forward decls  ======================
 void tcaSelect(uint8_t i);
@@ -239,13 +211,11 @@ void showNetworkSetup();
 void showNetworkSplash(const String& ip);
 void showQuickStartLoop();
 void showAbletonConnectedAll(uint16_t ms = 1000);
-void showQuickStartInstructions();
 
+void handlePing(OSCMessage &msg);
 void handleTrackName(OSCMessage &msg);
 void handleActiveTrack(OSCMessage &msg);
 void handleReannounceOSC(OSCMessage &msg);
-void handleHi(OSCMessage &msg);
-void sendHelloToM4L();
 void handleTracksReset();
 
 void handleRoot();
@@ -278,8 +248,6 @@ void drawLines(uint8_t ts, int y0, const char* l1=nullptr, const char* l2=nullpt
 void handleSerialLine(const String& line);
 void saveWiredMode();
 void loadWiredMode();
-void saveDeviceID();
-void loadDeviceID();
 void showStartupSplash();
 
 // Bring up a temporary Access Point alongside station mode
@@ -316,7 +284,7 @@ void setup() {
   Wire.setClock(400000); // Fast I2C
   Wire.setTimeOut(15);   // ms
 
-  Serial.println("\n\n=== TDS-8 v0.343 OFFSET SUPPORT ===");
+  Serial.println("\n\n=== TDS-8 v0.32 OFFSET SUPPORT ===");
 
   // Init all OLEDs
   for (uint8_t i = 0; i < numScreens; i++) {
@@ -334,59 +302,14 @@ void setup() {
   loadConfig();
   loadWifiCreds();
   loadTrackNames();
-  // Load saved wired mode preference (defaults to true if never set)
-  loadWiredMode();
-  Serial.printf("Loaded mode: %s\n", wiredOnly ? "WIRED" : "WIFI");
-  // Load saved device ID (defaults to 0 if never set)
-  loadDeviceID();
-  
-  // Initialize actual track numbers based on device ID
-  int offset = deviceID * 8;
-  for (int i = 0; i < numScreens; i++) {
-    actualTrackNumbers[i] = offset + i;
-  }
-  
-  // CRITICAL FIX: Clear track names if they contain generic "Track X" that doesn't match current device ID
-  bool needsClear = false;
-  Serial.printf("DEBUG: Checking track names for deviceID=%d (expected tracks %d-%d)\n", deviceID, offset + 1, offset + 8);
-  for (int i = 0; i < numScreens; i++) {
-    Serial.printf("DEBUG: Screen %d: trackNames='%s', expectedTrack=%d\n", i, trackNames[i].c_str(), offset + i + 1);
-    if (trackNames[i].startsWith("Track ")) {
-      int storedTrack = trackNames[i].substring(6).toInt();
-      int expectedTrack = offset + i + 1;
-      if (storedTrack != expectedTrack) {
-        Serial.printf("DEBUG: Mismatch found - storedTrack=%d != expectedTrack=%d\n", storedTrack, expectedTrack);
-        needsClear = true;
-        break;
-      }
-    }
-  }
-  
-  if (needsClear) {
-    Serial.println("DEBUG: Clearing mismatched track names for device ID change");
-    for (int i = 0; i < numScreens; i++) {
-      trackNames[i] = "";
-      Serial.printf("DEBUG: Cleared trackNames[%d] to ''\n", i);
-    }
-    saveTrackNames();
-  } else {
-    Serial.println("DEBUG: No track name clearing needed");
-  }
-  
-  // Send mode status - if WiFi mode and already connected, include IP
-  if (wiredOnly) {
-    Serial.println("MODE: WIRED");
-  } else {
-    Serial.println("MODE: WIFI");
-  }
+  loadWiredMode();  // NEW: load wired/wifi preference
 
   Serial.printf("VERSION: %s\n", FW_VERSION);
   Serial.printf("BUILD: %s\n", FW_BUILD);
   Serial.printf("WIRED_ONLY: %s\n", wiredOnly ? "true" : "false");
-  Serial.printf("DEVICE_ID: %d\n", deviceID);
   
-  // Kick off the non-blocking startup sequence
-  showStartupSplash(); // Draw the logos
+  // Show startup splash screen (includes instructions)
+  showStartupSplash();
   
   // ========== WIRED MODE (DEFAULT) ==========
   if (wiredOnly) {
@@ -395,36 +318,28 @@ void setup() {
     
     WiFi.mode(WIFI_OFF);  // Explicitly turn off WiFi
     
-    // Show splash for 2 seconds, then transition to running
-    currentState = STATE_STARTUP_SPLASH;
-    stateTransitionTime = millis() + 2000; // Hold splash for 2 seconds
-    
-    Serial.println("🚀 Wired mode active - ready for serial commands");
+    // Don't draw track names yet - splash screen already shows instructions
+    // Track names will appear when first /trackname command is received
     
     // No HTTP server, no OSC, no WiFi - just serial
-    // State machine in loop() will handle transition to running after 2 seconds
+    Serial.println("✅ Ready for serial commands");
+    Serial.println("📋 Commands: VERSION, WIFI_ON, /trackname, /activetrack, /ping");
     return;  // Skip all WiFi setup
   }
-  
-  // WiFi mode: Start WiFi setup immediately, THEN show splash for 2 seconds
+
   // ========== WIFI MODE ==========
+  Serial.println("📡 WIFI MODE - Starting WiFi...");
   
   WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
   WiFi.persistent(true);
 
-  // Try to connect with saved creds (non-blocking start)
+  // Try to connect with saved creds
   if (wifiSSID.length()) WiFi.begin(wifiSSID.c_str(), wifiPW.c_str());
   else                   WiFi.begin();
 
-  // Show "Connecting to WiFi..." screen while WiFi attempts to connect
-  showWiFiConnecting();
-  
-  // Wait up to 5 seconds for WiFi connection (with visual feedback)
   unsigned long t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 5000) {
-    delay(250);
-  }
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 12000) delay(250);
 
   // If not connected -> setup or rescue
   if (WiFi.status() != WL_CONNECTED) {
@@ -437,13 +352,8 @@ void setup() {
     if (haveSaved) {
       Serial.println("⏳ Retrying STA join with saved creds…");
       WiFi.begin(wifiSSID.c_str(), wifiPW.c_str());
-      
-      // Show "Retrying..." screen during retry
-      showWiFiRetrying();
-      
-      // Wait up to 5 seconds for retry
       unsigned long t1 = millis();
-      while (WiFi.status() != WL_CONNECTED && millis() - t1 < 5000UL) delay(250);
+      while (WiFi.status() != WL_CONNECTED && millis() - t1 < 20000UL) delay(250);
 
       if (WiFi.status() != WL_CONNECTED) {
         showNetworkSetup();
@@ -468,16 +378,17 @@ void setup() {
 
   // Connected?
   if (WiFi.status() == WL_CONNECTED) {
-    // WiFi connected
+    Serial.println(String("✅ Wi-Fi connected. IP: ") + WiFi.localIP().toString());
     showNetworkSplash(WiFi.localIP().toString());
     startRescueAP();  // Keep rescue AP for a window
   } else {
-    // WiFi not connected
+    Serial.println("⚠️ Wi-Fi NOT connected; Rescue AP should be up.");
     if (!WiFi.softAPgetStationNum()) startRescueAP();
   }
 
   // mDNS + HTTP
-  MDNS.begin(mdnsName);
+  if (MDNS.begin(mdnsName)) Serial.println("🌐 mDNS: http://tds8.local");
+  else                      Serial.println("⚠️ mDNS failed");
 
   // HTTP routes
   server.on("/",             HTTP_GET,  handleRoot);
@@ -508,22 +419,23 @@ void setup() {
   nextBeaconAt     = millis() + beaconPeriodMs;
 
   if (WiFi.status() == WL_CONNECTED) {
-    showNetworkSplash(WiFi.localIP().toString());
+    showQuickStartLoop();
+    delay(0); // Feed watchdog
+    Serial.println("📺 Switching to track displays...");
+    for (uint8_t i = 0; i < numScreens; i++) {
+      drawTrackName(i, trackNames[i]);
+      delay(0); // Feed watchdog after each display
+    }
+    Serial.println("✅ Track displays ready");
   }
-  
-  // NOW set splash screen timer AFTER WiFi setup is complete
-  currentState = STATE_STARTUP_SPLASH;
-  stateTransitionTime = millis() + 2000; // Hold splash for 2 seconds
+  Serial.println("✅ Setup complete");
 }
 
 // =========================  LOOP  =========================
 static String serialBuffer = "";
 
 void loop() {
-  // ========== SERIAL COMMAND HANDLER (ALWAYS ACTIVE, EVEN DURING SPLASH) ==========
-  // CRITICAL: Process serial commands BEFORE state machine so DEVICE_ID commands
-  // are received immediately, even during the 2-second splash screen
-  static String serialBuffer = "";
+  // ========== SERIAL COMMAND HANDLER (WORKS IN BOTH MODES) ==========
   while (Serial.available() > 0) {
     char c = (char)Serial.read();
     if (c == '\r') continue;
@@ -538,17 +450,6 @@ void loop() {
     }
   }
 
-  // ================== STATE MACHINE FOR STARTUP SEQUENCE ==================
-  // Check if splash screen time has elapsed and transition to running state
-  if (currentState == STATE_STARTUP_SPLASH) {
-    if (millis() >= stateTransitionTime) {
-      Serial.println("✅ Splash screen complete. Switching to track displays.");
-      refreshAll(); // Show track displays with current track names
-      currentState = STATE_RUNNING;
-    }
-    // Continue processing below - don't return early!
-  }
-
   // ========== WIFI MODE ONLY: Handle server, OSC, etc. ==========
   if (!wiredOnly && WiFi.getMode() != WIFI_OFF) {
     server.handleClient();
@@ -558,23 +459,11 @@ void loop() {
       if (WiFi.status() == WL_CONNECTED) {
         WiFi.softAPdisconnect(true);
         rescueAP = false;
-        // Rescue AP stopped - WiFi connected
-        
-        // Wait a moment for bridge to be ready, then broadcast IP multiple times
-        delay(1000);
-        broadcastIP();
-        delay(500);
-        broadcastIP();
-        delay(500);
-        broadcastIP();
-        
-        // Bridge will send /reannounce to M4L when it receives /ipupdate
-        // No need to send it from device - avoids conflicts with handshake
+        Serial.println("🛟 Rescue AP stopped (STA connected)");
       } else if (RESCUE_AP_MAX_MS > 0 && (long)(millis() - rescueStopAt) >= 0) {
         WiFi.softAPdisconnect(true);
         rescueAP = false;
-        // Rescue AP stopped
-        broadcastIP();
+        Serial.println("🛟 Rescue AP stopped (timeout)");
       }
     }
 
@@ -585,13 +474,37 @@ void loop() {
       refreshAll();
     }
 
+    // Deferred /pong
+    if (WANT_PONG) {
+      WANT_PONG = false;
+      OSCMessage m("/pong");
+      m.add((int32_t)1);
+      if (Udp.beginPacket(PONG_IP, PONG_PORT)) {
+        m.send(Udp);
+        Udp.endPacket();
+      }
+      m.empty();
+    }
+
+    // Flash timing
+    static bool flashOn = false;
+    if (wantPingFlash) {
+      wantPingFlash = false;
+      flashOn = true;
+      pingFlashUntil = millis() + 150;
+    }
+    if (flashOn && millis() > pingFlashUntil) {
+      flashOn = false;
+      drawTrackName(0, trackNames[0]);
+    }
+
     // OSC receive
     OSCMessage msg;
     int size;
     while ((size = Udp.parsePacket()) > 0) {
       while (size--) msg.fill(Udp.read());
       if (!msg.hasError()) {
-        msg.dispatch("/hi",          handleHi);
+        msg.dispatch("/ping",        handlePing);
         msg.dispatch("/trackname",   handleTrackName);
         msg.dispatch("/activetrack", handleActiveTrack);
         msg.dispatch("/reannounce",  handleReannounceOSC);
@@ -601,33 +514,42 @@ void loop() {
       yield();
     }
 
-    // Discovery beacons and M4L heartbeat
+    // Drop connection if pings stop
+    if (m4lConnected && millis() > connectedUntil) {
+      m4lConnected = false;
+      drawTrackName(7, trackNames[7]);
+    }
+
+    // Discovery beacons
     unsigned long now = millis();
     if (discoveryActive) {
       if (now >= discoveryUntil) {
         discoveryActive = false;
       } else if (now >= nextBeaconAt) {
         broadcastIP();
-        sendHelloToM4L(); // Send /hello to M4L for heartbeat
         nextBeaconAt += beaconPeriodMs;
-      }
-    } else {
-      // Keep sending /hello even after discovery period ends
-      if (now >= nextBeaconAt) {
-        sendHelloToM4L();
-        nextBeaconAt = now + beaconPeriodMs;
       }
     }
 
-    // Quick-Start once (simplified): show ONLINE + IP on OLED 1 and logo on OLED 8
-    if (!quickStartShown && WiFi.status() == WL_CONNECTED && !abletonBannerShown) {
-      showNetworkSplash(WiFi.localIP().toString());
+    // Quick-Start once
+    if (!quickStartShown && WiFi.status() == WL_CONNECTED && !m4lConnected && !abletonBannerShown) {
+      showQuickStartLoop();
       quickStartShown = true;
     }
   }
   
-  // ========== WIRED MODE ==========
+  // ========== WIRED MODE: Flash timing still works ==========
   else {
+    static bool flashOn = false;
+    if (wantPingFlash) {
+      wantPingFlash = false;
+      flashOn = true;
+      pingFlashUntil = millis() + 150;
+    }
+    if (flashOn && millis() > pingFlashUntil) {
+      flashOn = false;
+      drawTrackName(0, trackNames[0]);
+    }
   }
 }
 
@@ -694,7 +616,7 @@ void drawTrackName(uint8_t screen, const String& name) {
   };
 
   if (raw.length()) {
-    // normalize spaces
+    // normalize spaces + split into words
     String s; s.reserve(raw.length()); bool lastSpace = false;
     for (size_t i=0;i<raw.length();++i){ char c=raw[i];
       if (c==' '||c=='\t'){ if(!lastSpace){ s+=' '; lastSpace=true; } }
@@ -702,57 +624,43 @@ void drawTrackName(uint8_t screen, const String& name) {
     while (s.length() && s[0]==' ') s.remove(0,1);
     while (s.length() && s[s.length()-1]==' ') s.remove(s.length()-1);
 
+    std::vector<String> words;
+    if (s.length()){
+      int start=0; for (int i=0;i<=(int)s.length();++i){
+        if (i==(int)s.length() || s[i]==' '){ words.push_back(s.substring(start,i)); start=i+1; }
+      }
+    }
+
     bool drawn=false;
-    // Try text size 2, then 1
     for (uint8_t ts : { (uint8_t)2, (uint8_t)1 }) {
-      // First try: fit everything on one line
-      if (_textWidth(s, ts) <= maxW) {
-        drawSingleLine(s, ts);
-        drawn=true;
-        break;
-      }
-      
-      // Second try: split into two lines by character count, prefer space break
-      int maxChars = max(1, maxW/(CHAR_W*ts));
-      if ((int)s.length() <= maxChars * 2) {
-        // Find best break point (prefer space near middle)
-        int idealBreak = s.length() / 2;
-        int breakPoint = idealBreak;
-        
-        // Look for space within ±3 chars of ideal break
-        for (int offset = 0; offset <= 3 && idealBreak + offset < (int)s.length(); offset++) {
-          if (s[idealBreak + offset] == ' ') { breakPoint = idealBreak + offset; break; }
-          if (idealBreak - offset >= 0 && s[idealBreak - offset] == ' ') { breakPoint = idealBreak - offset; break; }
-        }
-        
-        String l1 = s.substring(0, breakPoint);
-        String l2 = s.substring(breakPoint);
-        l1.trim(); l2.trim();
-        
-        // Truncate if still too long
-        trimToWidth(l1, ts);
+      if (words.size() <= 1) {
+        if (_textWidth(s, ts) <= maxW) { drawSingleLine(s, ts); drawn=true; break; }
+        int maxChars = max(1, maxW/(CHAR_W*ts));
+        String l1 = s.substring(0,maxChars), l2 = s.substring(maxChars);
         trimToWidth(l2, ts);
-        
         if (_textWidth(l1, ts) <= maxW && _textWidth(l2, ts) <= maxW) {
-          drawTwoLines(l1, l2, ts);
-          drawn=true;
-          break;
+          drawTwoLines(l1,l2,ts); drawn=true; break;
         }
+        continue;
       }
+      for (int split=1; split<(int)words.size(); ++split){
+        String l1, l2;
+        for (int i=0;i<split;++i){ if(i) l1+=' '; l1+=words[i]; }
+        for (int i=split;i<(int)words.size();++i){ if(i>split) l2+=' '; l2+=words[i]; }
+        if (_textWidth(l1, ts)<=maxW && _textWidth(l2, ts)<=maxW){ drawTwoLines(l1,l2,ts); drawn=true; break; }
+      }
+      if (drawn) break;
+      int maxChars = max(1, maxW/(CHAR_W*ts));
+      String all=s, l1=all.substring(0,maxChars), l2=all.substring(maxChars);
+      trimToWidth(l2, ts);
+      if (_textWidth(l1, ts)<=maxW && _textWidth(l2, ts)<=maxW){ drawTwoLines(l1,l2,ts); drawn=true; break; }
     }
-    
-    // Fallback: truncate to one line at size 1
-    if (!drawn) {
-      uint8_t ts=1;
-      String l=s;
-      trimToWidth(l, ts);
-      drawSingleLine(l, ts);
-    }
+    if (!drawn){ uint8_t ts=1; String l=s; trimToWidth(l, ts); drawSingleLine(l, ts); }
   }
 
   // Draw actual track number at bottom (small text)
   display.setTextSize(1);
-  String trackNumStr = "Track " + String(actualTrackNumbers[screen] + 1); // "Track 1", "Track 2", etc.
+  String trackNumStr = String(actualTrackNumbers[screen] + 1); // Just "1", "2", "3", etc.
   int16_t x1, y1;
   uint16_t w, h;
   display.getTextBounds(trackNumStr, 0, 0, &x1, &y1, &w, &h);
@@ -761,13 +669,18 @@ void drawTrackName(uint8_t screen, const String& name) {
   display.setCursor(trackNumX, trackNumY);
   display.println(trackNumStr);
 
+  // flash dot (if on) — draw last so it isn’t cleared
+  if (screen == 0 && millis() <= pingFlashUntil) {
+    display.fillCircle(4, SCREEN_HEIGHT - 4, 2, SSD1306_WHITE);
+  }
+
   display.display();
   delay(0); // keep Wi-Fi/UDP breathing
 }
 
 void refreshAll() {
   for (uint8_t i = 0; i < numScreens; i++) drawTrackName(i, trackNames[i]);
-} // Redraw all screens with their current track names
+}
 
 void drawCentered(const String& s, uint8_t textSize, int y) {
   display.setTextSize(textSize);
@@ -801,8 +714,8 @@ void showNetworkSetup() {
 }
 
 void showNetworkSplash(const String& ip) {
-  // OLED 1 (index 0): Show ONLINE + IP
-  tcaSelect(0);
+  const uint8_t i = 7;  // screen 8 (0-based)
+  tcaSelect(i);
   display.invertDisplay(false);
   display.clearDisplay();
   display.setTextWrap(false);
@@ -837,38 +750,21 @@ void showNetworkSplash(const String& ip) {
 
   drawCentered("IP: " + ip, 1, 36);
   display.display();
-
-  // OLED 8 (index 7): PlayOptix logo only
-  tcaSelect(7);
-  display.invertDisplay(false);
-  display.clearDisplay();
-  display.display();
-  delay(10);
-  display.setTextWrap(false);
-  display.setTextColor(SSD1306_WHITE);
-  display.drawBitmap(0, 0, playoptix_logo, LOGO_WIDTH, LOGO_HEIGHT, SSD1306_WHITE);
-  display.fillRect(0, 54, 128, 10, SSD1306_BLACK);
-  display.display();
+  delay(1500);
 }
 
 void showAbletonConnectedAll(uint16_t ms) {
-  // Show Ableton Connected only on OLED 1 (index 0)
-  tcaSelect(0);
-  display.invertDisplay(false);
-  display.clearDisplay();
-  display.drawRect(0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1, SSD1306_WHITE);
-  drawLines(2, 15, "Ableton", "Connected", "");
-  display.display();
+  for (uint8_t i = 0; i < numScreens; i++) {
+    tcaSelect(i);
+    display.invertDisplay(false);
+    display.clearDisplay();
+    display.drawRect(0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1, SSD1306_WHITE);
+    drawLines(2, 15, "Ableton", "Connected", "");
+    display.display();
+    delay(0);
+  }
   if (ms) delay(ms);
   refreshAll();
-}
-
-void showWiFiConnecting() {
-  // No-op (remove instruction/connecting screens)
-}
-
-void showWiFiRetrying() {
-  // No-op (remove instruction/retry screens)
 }
 
 void showQuickStartLoop() {
@@ -886,10 +782,30 @@ void showQuickStartLoop() {
     }
     display.display();
   }
+  
   delay(500);
 }
 
 // ========================  OSC  ===========================
+void handlePing(OSCMessage &msg) {
+  uint16_t replyPort = Udp.remotePort();
+  if (msg.size() >= 1) {
+    if (msg.isInt(0))       replyPort = (uint16_t)((int32_t)msg.getInt(0));
+    else if (msg.isFloat(0)) replyPort = (uint16_t)msg.getFloat(0);
+  }
+  IPAddress rip = Udp.remoteIP();
+
+  connectedUntil = millis() + 4000UL;
+  m4lConnected   = true;
+  pingFlashUntil = millis() + 150;
+  wantPingFlash  = true;
+
+  // Defer the /pong send (do not block inside UDP handler)
+  PONG_IP   = rip;
+  PONG_PORT = replyPort;
+  WANT_PONG = true;
+}
+
 void handleTrackName(OSCMessage &msg) {
   if (msg.size() < 2) return;
   int idx = msg.getInt(0);
@@ -915,7 +831,7 @@ void handleTrackName(OSCMessage &msg) {
     trackNames[idx] = incoming;
     actualTrackNumbers[idx] = actualTrack;
     drawTrackName(idx, trackNames[idx]);
-    Serial.printf("RECV: /trackname %d '%s'\n", idx, buf);
+    Serial.printf("✅ /trackname %d '%s' (track %d)\n", idx, buf, actualTrack);
   }
 }
 
@@ -927,34 +843,10 @@ void handleActiveTrack(OSCMessage &msg) {
   activeTrack = idx;
   if (old >= 0) drawTrackName(old, trackNames[old]);
   drawTrackName(activeTrack, trackNames[activeTrack]);
-  Serial.printf("RECV: /activetrack %d\n", idx);
+  Serial.printf("🎯 /activetrack %d\n", idx);
 }
 
 void handleReannounceOSC(OSCMessage &msg) { broadcastIP(); }
-
-void handleHi(OSCMessage &msg) {
-  // Received /hi from M4L - Ableton is connected
-  Serial.println("RECV: /hi");
-  if (!abletonBannerShown) {
-    showAbletonConnectedAll();
-    abletonBannerShown = true;
-  }
-}
-
-void sendHelloToM4L() {
-  // Send /hello to M4L on port 9000 (broadcast)
-  if (WiFi.status() != WL_CONNECTED) return;
-  
-  IPAddress gw = WiFi.gatewayIP();
-  IPAddress bcast(gw[0], gw[1], gw[2], 255);
-  
-  OSCMessage msg("/hello");
-  Udp.beginPacket(bcast, 9000);
-  msg.send(Udp);
-  Udp.endPacket();
-  
-  Serial.println("SENT: /hello");
-}
 
 // =====================  HTTP endpoints  ===================
 void handleRoot() {
@@ -1133,8 +1025,8 @@ function renderTracks(){
   tgrid.innerHTML = '';
   for(let i=0;i<8;i++){
     const card = document.createElement('div'); card.className='trackCard';
-    const h = document.createElement('h3'); h.textContent = `Track ${i+0}`;
-    const inp = document.createElement('input'); inp.className='input'; inp.id='name'+i; inp.value = names[i] || `Track ${i+0}`;
+    const h = document.createElement('h3'); h.textContent = `Track ${i+1}`;
+    const inp = document.createElement('input'); inp.className='input'; inp.id='name'+i; inp.value = names[i] || `Track ${i+1}`;
     card.appendChild(h); card.appendChild(inp);
     tgrid.appendChild(card);
   }
@@ -1454,17 +1346,13 @@ void broadcastIP() {
   IPAddress bcast(gw[0], gw[1], gw[2], 255);
   String s = WiFi.localIP().toString();
 
-  // Send plain text IP (legacy)
   Udp.beginPacket(bcast, ipBroadcastPort); Udp.print(s); Udp.endPacket();
 
-  // Send OSC /ipupdate to LAN broadcast (bridge listens on 0.0.0.0:9000)
-  // Args: ip (string), deviceID (int)
   OSCMessage m("/ipupdate");
   m.add(s.c_str());
-  m.add((int)deviceID);
   Udp.beginPacket(bcast, ipBroadcastPort); m.send(Udp); Udp.endPacket();
   delay(0);
-  Serial.printf("SENT: /ipupdate %s\n", s.c_str());
+  Serial.printf("🔊 Announce: %s → %s:%d\n", s.c_str(), bcast.toString().c_str(), ipBroadcastPort);
 }
 
 // ======================  Forget Wi-Fi  =======================
@@ -1513,24 +1401,11 @@ void loadWiredMode() {
   prefs.end();
 }
 
-void saveDeviceID() {
-  prefs.begin("device", false);
-  prefs.putUChar("id", deviceID);
-  prefs.end();
-}
-
-void loadDeviceID() {
-  prefs.begin("device", true);
-  deviceID = prefs.getUChar("id", 0);  // default 0 = first device
-  if (deviceID > 3) deviceID = 0;  // Validate range 0-3
-  prefs.end();
-}
-
 void showStartupSplash() {
-  // Draws the initial TDS-8 Logo and PlayOptix logo without any delay.
+  // ===== SCREEN 1: TDS-8 Logo (3 seconds, NO BORDERS) =====
   const char* letters[] = {"T", "D", "S", "-", "8"};
   
-  // Clear ALL displays completely first
+  // Clear ALL displays completely first (prevents corruption/leftover data)
   for (uint8_t i = 0; i < numScreens; i++) {
     tcaSelect(i);
     display.clearDisplay();
@@ -1538,13 +1413,15 @@ void showStartupSplash() {
     delay(5); // Small delay to ensure clear completes
   }
   
-  // Displays 1-5: T D S - 8
+  // Displays 1-5: T D S - 8 (one letter per display, NO BORDERS)
   for (uint8_t i = 0; i < 5; i++) {
-    tcaSelect(i + 1);
+    tcaSelect(i + 1); // Start at display 1
     display.invertDisplay(false);
     display.clearDisplay();
     display.setTextWrap(false);
     display.setTextColor(SSD1306_WHITE);
+    
+    // Make letters as large as possible (size 6 - MAXIMUM)
     display.setTextSize(6);
     int16_t x1, y1; uint16_t w, h;
     display.getTextBounds(letters[i], 0, 0, &x1, &y1, &w, &h);
@@ -1553,26 +1430,19 @@ void showStartupSplash() {
     display.display();
   }
   
-  // Display 7: PlayOptix logo
+  // Display 7: Keep blank during splash (logo will appear on instruction screen)
   tcaSelect(7);
-  display.invertDisplay(false);
   display.clearDisplay();
-  display.display(); // Ensure clear is applied
-  delay(10);
-  display.setTextWrap(false);
-  display.setTextColor(SSD1306_WHITE);
-  display.drawBitmap(0, 0, playoptix_logo, LOGO_WIDTH, LOGO_HEIGHT, SSD1306_WHITE);
-  // Add a black rectangle at the bottom to cover any graphical artifacts
-  display.fillRect(0, 54, 128, 10, SSD1306_BLACK);
   display.display();
-}
-
-void showQuickStartInstructions() {
-  // Draws the instruction screens without any delay.
+  
+  // Show splash for 3 seconds
+  delay(3000);
+  
+  // ===== SCREEN 2: Instructions (NO BORDERS) =====
   int16_t x1, y1;
   uint16_t w, h;
-
-  // Display 0
+  
+  // Display 0: "Launch the" / "TDS-8 App"
   tcaSelect(0);
   display.clearDisplay();
   display.setTextSize(2);
@@ -1586,8 +1456,8 @@ void showQuickStartInstructions() {
   display.setCursor((SCREEN_WIDTH - w) / 2, 45);
   display.println("TDS-8");
   display.display();
-
-  // Display 1
+  
+  // Display 1: "Hit Connect"
   tcaSelect(1);
   display.clearDisplay();
   display.setTextSize(2);
@@ -1598,8 +1468,8 @@ void showQuickStartInstructions() {
   display.setCursor((SCREEN_WIDTH - w) / 2, 36);
   display.println("Connect");
   display.display();
-
-  // Display 2
+  
+  // Display 2: "Launch" / "Ableton"
   tcaSelect(2);
   display.clearDisplay();
   display.setTextSize(2);
@@ -1610,32 +1480,35 @@ void showQuickStartInstructions() {
   display.setCursor((SCREEN_WIDTH - w) / 2, 36);
   display.println("Ableton");
   display.display();
-
-  // Display 3
+  
+  // Display 3: "Drag TDS8.amxd" / "Onto Any Track"
   tcaSelect(3);
   display.clearDisplay();
   display.setTextSize(2);
   display.getTextBounds("Drag", 0, 0, &x1, &y1, &w, &h);
   display.setCursor((SCREEN_WIDTH - w) / 2, 11);
   display.println("Drag");
-  display.getTextBounds("TDS8", 0, 0, &x1, &y1, &w, &h);
+  display.getTextBounds("TDS8.amxd", 0, 0, &x1, &y1, &w, &h);
   display.setCursor((SCREEN_WIDTH - w) / 2, 28);
-  display.println("TDS8");
+  display.println("TDS8.amxd");
   display.getTextBounds("to a Track", 0, 0, &x1, &y1, &w, &h);
   display.setCursor((SCREEN_WIDTH - w) / 2, 45);
   display.println("to a Track");
   display.display();
-
-  // Display 4
+  
+  // Display 4: "Tap Refresh" / "In Device" / "or Dashboard"
   tcaSelect(4);
   display.clearDisplay();
   display.setTextSize(2);
-  display.getTextBounds("Tap Refresh", 0, 0, &x1, &y1, &w, &h);
-  display.setCursor((SCREEN_WIDTH - w) / 2, 28);
-  display.println("Tap Refresh");
+  display.getTextBounds("Tap", 0, 0, &x1, &y1, &w, &h);
+  display.setCursor((SCREEN_WIDTH - w) / 2, 18);
+  display.println("Tap");
+  display.getTextBounds("Refresh", 0, 0, &x1, &y1, &w, &h);
+  display.setCursor((SCREEN_WIDTH - w) / 2, 36);
+  display.println("Refresh");
   display.display();
-
-  // Display 5
+  
+  // Display 5: Blank
   tcaSelect(5);
   display.clearDisplay();
   display.setTextSize(2);
@@ -1649,20 +1522,21 @@ void showQuickStartInstructions() {
   display.setCursor((SCREEN_WIDTH - w) / 2, 45);
   display.println("Dashboard");
   display.display();
-
-  // Display 6 - blank
+  
+  // Display 6: Blank
   tcaSelect(6);
   display.clearDisplay();
   display.display();
 
-  // Display 7 (OLED 8) - Show PlayOptix logo
+  // Display 7: PlayOptix Logo with hacky fix
   tcaSelect(7);
   display.clearDisplay();
-  display.display(); // Ensure clear is applied
-  delay(10);
   display.drawBitmap(0, 0, playoptix_logo, LOGO_WIDTH, LOGO_HEIGHT, SSD1306_WHITE);
-  display.fillRect(0, 54, 128, 10, SSD1306_BLACK); // Cover artifacts at bottom
+  // HACK: Draw a black rectangle over the bottom to hide the display corruption
+  display.fillRect(0, 50, SCREEN_WIDTH, 14, SSD1306_BLACK);
   display.display();
+  
+  // Hold instructions indefinitely until track names arrive
 }
 
 // ==================  SERIAL COMMAND HANDLER (NEW)  ==================
@@ -1678,59 +1552,8 @@ void handleSerialLine(const String& line) {
 
   // VERSION
   if (head == "version") {
-    int trackStart = deviceID * 8 + 1;
-    int trackEnd = (deviceID + 1) * 8;
     Serial.printf("VERSION: %s\n", FW_VERSION);
     Serial.printf("BUILD: %s\n", FW_BUILD);
-    Serial.printf("DEVICE_ID: %d\n", deviceID);
-    Serial.printf("TRACKS: %d-%d\n", trackStart, trackEnd);
-    Serial.printf("MODE: %s\n", wiredOnly ? "WIRED" : "WIFI");
-    return;
-  }
-
-  // DEVICE_ID 0-3
-  if (head == "device_id") {
-    String arg = (sp >= 0) ? cmd.substring(sp + 1) : "";
-    arg.trim();
-    int newID = arg.toInt();
-    
-    Serial.printf("DEBUG: Received DEVICE_ID command with newID=%d, current deviceID=%d\n", newID, deviceID);
-    
-    if (newID < 0 || newID > 3) {
-      Serial.println("ERR: DEVICE_ID must be 0-3");
-      Serial.println("   Device 0 = tracks 1-8");
-      Serial.println("   Device 1 = tracks 9-16");
-      Serial.println("   Device 2 = tracks 17-24");
-      Serial.println("   Device 3 = tracks 25-32");
-      return;
-    }
-    
-    // If device ID is changing, clear all stored track names
-    if (newID != deviceID) {
-      Serial.printf("Device ID changing from %d to %d - clearing track names\n", deviceID, newID);
-      for (int i = 0; i < numScreens; i++) {
-        trackNames[i] = "";
-      }
-      saveTrackNames();
-    }
-    
-    // Update device ID
-    deviceID = newID;
-    saveDeviceID();
-    
-    // Update actual track numbers based on device ID
-    int offset = deviceID * 8;
-    for (int i = 0; i < numScreens; i++) {
-      actualTrackNumbers[i] = offset + i;
-    }
-    
-    // If already in running state, refresh display immediately
-    // If still in splash state, let it complete naturally - display will refresh when splash ends
-    if (currentState == STATE_RUNNING) {
-      refreshAll();
-    }
-    
-    Serial.printf("OK: DEVICE_ID set to %d (tracks %d-%d)\n", deviceID, offset + 1, offset + 8);
     return;
   }
 
@@ -1802,7 +1625,7 @@ void handleSerialLine(const String& line) {
     return;
   }
 
-  // /trackname <idx> "name" [actualTrack]
+  // /trackname <idx> <name> [actualTrack]
   if (cmd.startsWith("/trackname")) {
     int sp1 = cmd.indexOf(' ');
     if (sp1 > 0) {
@@ -1810,45 +1633,44 @@ void handleSerialLine(const String& line) {
       if (sp2 > 0) {
         int idx = cmd.substring(sp1 + 1, sp2).toInt();
         
-        // Find quoted name - look for opening quote
-        int quoteStart = cmd.indexOf('"', sp2);
-        if (quoteStart > 0) {
-          // Find closing quote
-          int quoteEnd = cmd.indexOf('"', quoteStart + 1);
-          if (quoteEnd > 0) {
-            // Extract name between quotes
-            String name = cmd.substring(quoteStart + 1, quoteEnd);
-            name.trim();
-            
-            // Look for actualTrack after closing quote
-            int actualTrack = idx; // Default to display index
-            int sp3 = cmd.indexOf(' ', quoteEnd + 1);
-            if (sp3 > 0) {
-              actualTrack = cmd.substring(sp3 + 1).toInt();
-            }
-            
-            if (idx >= 0 && idx < numScreens) {
-              if (!abletonBannerShown) {
-                abletonBannerShown = true;
-                if (!wiredOnly) wantAbletonBanner = true;
-              }
-
-              // If name is "Track", treat it as blank. Otherwise, use the provided name.
-              String finalName = (name == "Track") ? "" : name;
-
-              trackNames[idx] = finalName;
-              actualTrackNumbers[idx] = actualTrack;
-              drawTrackName(idx, trackNames[idx]);
-              Serial.printf("OK: /trackname %d \"%s\" (track %d)\n", idx, finalName.c_str(), actualTrack);
-            } else {
-              Serial.println("ERR: Index out of range (0-7)");
-            }
-            return;
-          }
+        // Find the third parameter (actualTrack) if present
+        int sp3 = cmd.indexOf(' ', sp2 + 1);
+        String name;
+        int actualTrack = idx; // Default to display index
+        
+        if (sp3 > 0) {
+          // Three parameters: idx, name, actualTrack
+          name = cmd.substring(sp2 + 1, sp3);
+          actualTrack = cmd.substring(sp3 + 1).toInt();
+        } else {
+          // Two parameters: idx, name
+          name = cmd.substring(sp2 + 1);
         }
+        
+        name.trim();
+        
+        // Remove quotes if present
+        if (name.length() >= 2 && name[0] == '"' && name[name.length()-1] == '"') {
+          name = name.substring(1, name.length()-1);
+        }
+        
+        if (idx >= 0 && idx < numScreens) {
+          if (!abletonBannerShown) {
+            abletonBannerShown = true;
+            // In wired mode, skip the banner animation
+            if (!wiredOnly) wantAbletonBanner = true;
+          }
+          trackNames[idx] = name;
+          actualTrackNumbers[idx] = actualTrack;
+          drawTrackName(idx, trackNames[idx]);
+          Serial.printf("OK: /trackname %d \"%s\" (track %d)\n", idx, name.c_str(), actualTrack);
+        } else {
+          Serial.println("ERR: Index out of range (0-7)");
+        }
+        return;
       }
     }
-    Serial.println("ERR: Format: /trackname <idx> \"name\" [actualTrack]");
+    Serial.println("ERR: Format: /trackname <idx> <name> [actualTrack]");
     return;
   }
 
@@ -1872,49 +1694,23 @@ void handleSerialLine(const String& line) {
     return;
   }
 
-  // /ableton_on - Ableton is connected
-  if (cmd.startsWith("/ableton_on")) {
-    abletonConnected = true;
-    heartbeatFlashUntil = millis() + 300;  // Flash heartbeat for 300ms
-    if (showingDisconnectMessage) {
-      showingDisconnectMessage = false;
-      refreshAll(); // Redraw track names
-    } else {
-      // Just redraw OLED 8 to show heartbeat
-      drawTrackName(7, trackNames[7]);
-    }
-    // Ableton connected
+  // /ping
+  if (cmd.startsWith("/ping")) {
+    connectedUntil = millis() + 4000UL;
+    m4lConnected = true;
+    wantPingFlash = true;
+    Serial.println("PONG");
     return;
   }
-
-  // /ableton_off - Ableton disconnected
-  if (cmd.startsWith("/ableton_off")) {
-    abletonConnected = false;
-    // Don't show disconnect message - it causes false positives
-    // Just update the connection flag
-    return;
-  }
-
 
   // /reannounce
   if (cmd.startsWith("/reannounce")) {
     if (!wiredOnly && WiFi.status() == WL_CONNECTED) {
       broadcastIP();
-      Serial.println("SENT: /reannounce");
+      Serial.println("OK: /reannounce (IP broadcast sent)");
     } else {
-      Serial.println("SENT: /reannounce");
+      Serial.println("OK: /reannounce (wired mode, no broadcast)");
     }
-    return;
-  }
-
-  // CLEAR_TRACKS
-  if (head == "clear_tracks") {
-    for (int i = 0; i < numScreens; i++) {
-      trackNames[i] = "";
-    }
-    saveTrackNames();
-    refreshAll();
-    Serial.println("OK: All track names cleared");
     return;
   }
 
@@ -1922,13 +1718,12 @@ void handleSerialLine(const String& line) {
   Serial.println("ERR: Unknown command");
   Serial.println("📋 Available commands:");
   Serial.println("   VERSION - Show firmware version");
-  Serial.println("   DEVICE_ID 0-3 - Set device ID for multi-device setups");
-  Serial.println("   CLEAR_TRACKS - Clear all stored track names");
   Serial.println("   WIRED_ONLY true/false - Toggle wired/WiFi mode");
   Serial.println("   WIFI_JOIN \"ssid\" \"password\" - Save WiFi credentials");
   Serial.println("   FORGET - Clear WiFi credentials");
   Serial.println("   REBOOT - Restart device");
   Serial.println("   /trackname <idx> <name> - Set track name (0-7)");
   Serial.println("   /activetrack <idx> - Highlight active track");
+  Serial.println("   /ping - Heartbeat (responds with PONG)");
   Serial.println("   /reannounce - Broadcast IP (WiFi mode only)");
 }

@@ -1,0 +1,24 @@
+
+---
+
+## 3️⃣ Verify & Browse the Web UI
+
+1. **Switch** your computer/phone Wi-Fi back to your normal network (e.g. “Cardinal”).  
+2. **Open** your browser to **http://tds8.local** (or the numeric DHCP IP shown).  
+3. You’ll see the **TDS8 Network Config** page with read-only fields:  
+
+ - IP Address  
+ - Gateway  
+ - Subnet  
+ - DNS 1 / DNS 2  
+
+4. **Click “Refresh”** to re-load the current DHCP info at any time.
+
+---
+
+## 4️⃣ Integrate with Ableton Live
+
+1. **Copy** `tds8.amxd` into a folder you use for Max-for-Live devices.  
+2. In Live’s Browser, **Add Folder** and point to that folder.  
+3. **Drag** the **TDS8** device (`tds8.amxd`) onto any MIDI or Audio track.  
+4. The device contains a patch like:

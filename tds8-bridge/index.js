@@ -26,6 +26,30 @@ const Bindings = autoDetect();
 const MAX_DEVICES = 4;
 let devices = []; // Array of { id, serial, path, buffer, version, deviceID }
 
+// Global-level dedup keyed by actual track number (0..31)
+const lastGlobalTrack = new Map(); // key: globalIndex → { name, ts }
+const GLOBAL_TRACK_DEDUP_MS = 2000;
+function shouldForwardGlobal(globalIndex, nameEscaped) {
+  try {
+    const rec = lastGlobalTrack.get(globalIndex);
+    const now = Date.now();
+    if (rec && rec.name === nameEscaped && (now - rec.ts) < GLOBAL_TRACK_DEDUP_MS) {
+      return false;
+    }
+    lastGlobalTrack.set(globalIndex, { name: nameEscaped, ts: now });
+    return true;
+  } catch { return true; }
+}
+
+// Debounce /reannounce so M4L doesn't get spammed
+let lastReannounceTs = 0;
+function requestReannounce() {
+  const now = Date.now();
+  if (now - lastReannounceTs < 2000) return; // 2s gate
+  lastReannounceTs = now;
+  try { sendOSC('/reannounce', []); } catch {}
+}
+
 // Legacy single device variables (for backward compatibility)
 let serial = null;
 let serialPath = null;
@@ -38,6 +62,46 @@ const wss = new WebSocket.Server({ server });
 
 // OSC UDP Port for broadcasting to Ableton M4L (lazy init)
 let udpPort = null;
+
+// De-duplication for /trackname forwarding
+// - Content-level: only forward if text changed for (deviceId, localIndex)
+// - Burst-level: also suppress identical repeats within a short window
+const lastTracknameValue = new Map(); // key: `${deviceId}:${localIndex}` → lastEscapedName
+const lastTracknameTime = new Map();  // key: `${deviceId}:${localIndex}:${name}` → timestamp
+const TRACKNAME_DEDUP_MS = 2000;
+function shouldSendTrackname(deviceId, localIndex, nameEscaped) {
+  try {
+    const keySlot = `${deviceId}:${localIndex}`;
+    const keyBurst = `${deviceId}:${localIndex}:${nameEscaped}`;
+    const now = Date.now();
+    const prevValue = lastTracknameValue.get(keySlot);
+    if (prevValue === nameEscaped) {
+      // Same content already sent for this slot → skip
+      return false;
+    }
+    const prevTime = lastTracknameTime.get(keyBurst) || 0;
+    if (now - prevTime < TRACKNAME_DEDUP_MS) {
+      // Burst duplicate of the exact same payload → skip
+      return false;
+    }
+    // Accept and record
+    lastTracknameValue.set(keySlot, nameEscaped);
+    lastTracknameTime.set(keyBurst, now);
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+function normalizeName(s) {
+  try {
+    return String(s ?? '')
+      .replace(/\\"/g, '"')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  } catch { return ''; }
+}
 
 function initOSC() {
     if (!udpPort) {
@@ -80,6 +144,7 @@ let lastHelloResponse = 0;
 
 // Send OSC message to Ableton (M4L)
 function sendOSC(address, args = []) {
+    console.log(`[sendOSC] Called with address: ${address} and args: ${JSON.stringify(args)}`);
     const port = initOSC();
     if (!port) {
         console.error('❌ OSC port not initialized - cannot send', address);
@@ -98,6 +163,7 @@ function sendOSC(address, args = []) {
             args: args
         }, M4L_IP, M4L_PORT);
         const argsStr = args.length > 0 ? ' [' + args.map(a => a.value || a).join(', ') + ']' : '';
+        console.log(`[sendOSC] Successfully sent OSC message: ${address} with args: ${JSON.stringify(args)}`);
         console.log(`📤 OSC → M4L (${M4L_IP}:${M4L_PORT}): ${address}${argsStr}`);
         
         // Broadcast to browser UI
@@ -108,6 +174,7 @@ function sendOSC(address, args = []) {
             argsStr: argsStr
         });
     } catch (err) {
+        console.error(`[sendOSC] Error sending OSC message: ${address} with args: ${JSON.stringify(args)}`, err.message, err.stack);
         console.error(`❌ OSC send error (${address}):`, err.message, err.stack);
     }
 }
@@ -199,19 +266,13 @@ function initOSCListener() {
                         console.log('✓ Ableton CONNECTED');
                         
                         // Send /reannounce to M4L via OSC to request track names
-                        setTimeout(() => {
-                            try {
-                                sendOSC('/reannounce', []);
-                            } catch (err) {
-                                console.error('Failed to send /reannounce:', err.message);
-                            }
-                        }, 1000);
+                        setTimeout(() => { requestReannounce(); }, 1000);
                     }
                     return;
                 }
                 
                 // Forward OSC commands to device via serial
-                if (oscMsg.address === "/trackname" && oscMsg.args.length >= 2) {
+                if (oscMsg.address === "/trackname" && oscMsg.args.length >= 2) { // Handle 2 or 3 args
                     // If no serial connection is open yet, ignore quietly to avoid spam on boot
                     const serialReady = (serial && serial.isOpen) || (devices && devices.length > 0);
                     if (!serialReady) {
@@ -220,9 +281,16 @@ function initOSCListener() {
                     }
                     const displayIndex = oscMsg.args[0].value;
                     const nameRaw = oscMsg.args[1].value;
+                    // Handle both 2-arg (index, name) and 3-arg (index, name, actualTrack) messages
                     const actualTrack = oscMsg.args.length >= 3 ? oscMsg.args[2].value : displayIndex;
 
                     const esc = String(nameRaw).replace(/"/g, '\\"');
+                    const escNorm = normalizeName(nameRaw);
+                    const globalIndex = Number.isFinite(actualTrack) ? Number(actualTrack) : Number(displayIndex);
+                    if (!shouldForwardGlobal(globalIndex, escNorm)) {
+                      console.log(`⏭️  Deduped global /trackname for track ${globalIndex}`);
+                      return;
+                    }
                     
                     // Multi-device: Route to correct device based on track number
                     const deviceId = Math.floor(actualTrack / 8);
@@ -230,31 +298,62 @@ function initOSCListener() {
                     const targetDevice = devices.find(d => d.id === deviceId);
 
                     if (targetDevice) {
-                        const cmd = `/trackname ${localIndex} "${esc}" ${actualTrack}\n`;
-                        sendToDevice(deviceId, cmd);
-                        console.log(`📍 Routed track ${actualTrack} to Device ${deviceId} (local index ${localIndex})`);
+                        if (shouldSendTrackname(deviceId, localIndex, escNorm)) {
+                          const cmd = `/trackname ${localIndex} "${esc}" ${actualTrack}\n`;
+                          sendToDevice(deviceId, cmd);
+                          console.log(`📍 Routed track ${actualTrack} to Device ${deviceId} (local index ${localIndex})`);
+                        } else {
+                          console.log(`⏭️  Deduped /trackname for Device ${deviceId} idx ${localIndex}`);
+                        }
                     } else if (devices.length > 0) {
                         // Fallback for single connected device if routing fails
-                        const cmd = `/trackname ${displayIndex} "${esc}" ${actualTrack}\n`;
-                        sendToDevice(devices[0].id, cmd);
+                        const fallbackId = devices[0].id;
+                        if (shouldSendTrackname(fallbackId, displayIndex, escNorm)) {
+                          const cmd = `/trackname ${displayIndex} "${esc}" ${actualTrack}\n`;
+                          sendToDevice(fallbackId, cmd);
+                        } else {
+                          console.log(`⏭️  Deduped /trackname for fallback Device ${fallbackId} idx ${displayIndex}`);
+                        }
                     } else {
                         // Single device mode (legacy)
                         if (serial && serial.isOpen) {
-                            const cmd = `/trackname ${displayIndex} "${esc}" ${actualTrack}\n`;
-                            send(cmd);
+                            if (shouldSendTrackname(0, displayIndex, escNorm)) {
+                              const cmd = `/trackname ${displayIndex} "${esc}" ${actualTrack}\n`;
+                              send(cmd);
+                            } else {
+                              console.log(`⏭️  Deduped /trackname for legacy serial idx ${displayIndex}`);
+                            }
                         } else {
                             // Silently ignore if the single-device serial port isn't open
                         }
                     }
 
-                    // Store the UNESCAPED name for UI/API (not the escaped version)
-                    if (displayIndex >= 0 && displayIndex < 32) {
-                        currentTrackNames[displayIndex] = String(nameRaw);
+                    // Store the UNESCAPED name for UI/API (limited to first 8 fields)
+                    if (Number.isFinite(globalIndex) && globalIndex >= 0 && globalIndex < 8) {
+                        currentTrackNames[globalIndex] = String(nameRaw);
                     }
                 }
                 else if (oscMsg.address === "/activetrack" && oscMsg.args.length >= 1) {
                     const index = oscMsg.args[0].value;
+                    const deviceId = Math.floor(index / 8);
+                    const localIndex = index % 8;
+                    if (devices && devices.length > 0) {
+                    const targetDevice = devices.find(d => d.id === deviceId);
+                    if (targetDevice) {
+                        // Send selection to target device
+                        sendToDevice(deviceId, `/activetrack ${localIndex}\n`);
+                        // Clear selection on all other devices
+                        devices.filter(d => d.id !== deviceId && d.serial && d.serial.isOpen)
+                               .forEach(d => sendToDevice(d.id, `/activetrack -1\n`));
+                    } else if (devices.length === 1) {
+                        sendToDevice(devices[0].id, `/activetrack ${localIndex}\n`);
+                    } else {
+                        // No exact match; conservatively clear all then no-op (or choose first)
+                        sendToAll(`/activetrack -1\n`);
+                    }
+                    } else {
                     send(`/activetrack ${index}\n`);
+                    }
                 }
                 else if (oscMsg.address === "/ping") {
                     send(`/ping\n`);
@@ -645,6 +744,7 @@ app.get('/api/ports/all', async (_req, res) => {
 
 // Map COM ports to device IDs (persistent across disconnects)
 const portToDeviceId = new Map();
+const connectingPorts = new Set(); // Prevent race conditions on auto-connect
 
 app.post('/api/connect', async (req, res) => {
   try {
@@ -948,38 +1048,42 @@ app.post('/api/tracknames', (req, res) => {
             console.error('❌ Error saving track names:', err);
             return res.status(500).json({ ok: false, error: 'Failed to save track names' });
         }
-        console.log('💾 Track names saved to track_names.json');
-        res.json({ ok: true });
+        return res.json({ ok: true });
     });
 });
 
 app.post('/api/trackname', (req, res) => {
   try {
     const { index, name, actualTrack } = req.body || {};
-    
+
     // Debug: log exactly what we received
-    console.log('🔍 [DEBUG] Received trackname request:', {
+    console.log(' [DEBUG] Received trackname request:', {
       index,
       name,
       nameType: typeof name,
       nameLength: name ? name.length : 0,
       actualTrack
     });
-    
-    if (index === undefined || `${index}`.trim() === '') throw new Error('Missing index');
+
     // Allow empty string name to clear display; only require the field to be present
     if (name === undefined) throw new Error('Missing name');
     if (index >= 0 && index < 8) currentTrackNames[index] = String(name);
-    
+
     // Build safe, quoted name and always include actualTrack (device adds +1, so default to index)
     const esc = String(name).replace(/"/g, '\\"');
+    const escNorm = normalizeName(name);
     const at = (actualTrack !== undefined) ? actualTrack : Number(index);
     const cmd = `/trackname ${index} "${esc}" ${at}\n`;
-    
+    // Global dedup: suppress duplicate track name updates for the same actual track
+    if (!shouldForwardGlobal(Number(at), escNorm)) {
+      console.log(` Deduped global /api/trackname for track ${at}`);
+      return res.json({ ok: true, dedup: true });
+    }
+
     // Calculate which device should receive this track (based on actualTrack)
     const targetDeviceId = Math.floor(at / 8);
-    
-    console.log('📤 [TRACKNAME] Routing:', {
+
+    console.log('[TRACKNAME] Routing:', {
       index,
       name: name,
       actualTrack: at,
@@ -987,57 +1091,83 @@ app.post('/api/trackname', (req, res) => {
       devicesCount: devices.length,
       availableDevices: devices.map(d => `ID=${d.deviceID}`).join(', ')
     });
-    
+
     // Route to correct device if multi-device mode
     if (devices.length > 1) {
-      console.log(`🔍 [ROUTING] Looking for deviceId=${targetDeviceId} for track ${at}`);
+      console.log(` [ROUTING] Looking for deviceId=${targetDeviceId} for track ${at}`);
       const targetDevice = devices.find(d => d.deviceID === targetDeviceId || d.id === targetDeviceId);
       if (targetDevice) {
-        sendToDevice(targetDevice.id, cmd);
-        console.log(`📤 [Device ${targetDeviceId}] ${targetDevice.path} ← Track ${at}: "${name}"`);
+        if (shouldSendTrackname(targetDevice.id, index, escNorm)) {
+          sendToDevice(targetDevice.id, cmd);
+          console.log(` [Device ${targetDeviceId}] ${targetDevice.path} ← Track ${at}: "${name}"`);
+        } else {
+          console.log(` Deduped /api/trackname for Device ${targetDevice.id} idx ${index}`);
+        }
       } else {
-        console.warn(`⚠️ Device ${targetDeviceId} not found for track ${at}. Available:`, devices.map(d => `[ID=${d.deviceID}, path=${d.path}]`).join(', '));
-        console.warn(`⚠️ Falling back to first device`);
-        send(cmd);
+        console.warn(` Device ${targetDeviceId} not found for track ${at}. Available:`, devices.map(d => `[ID=${d.deviceID}, path=${d.path}]`).join(', '));
+        console.warn(` Falling back to first device`);
+        if (shouldSendTrackname(0, index, escNorm)) send(cmd);
       }
     } else {
       // Single device mode: prefer multi-device pipe if available
       if (devices.length > 0) {
         const d0 = devices[0];
-        sendToDevice(d0.id, cmd);
-        console.log(`📤 [Device ${d0.deviceID}] ${d0.path} ← Track ${at}: "${name}"`);
+        if (shouldSendTrackname(d0.id, index, escNorm)) {
+          sendToDevice(d0.id, cmd);
+          console.log(` [Device ${d0.deviceID}] ${d0.path} ← Track ${at}: "${name}"`);
+        } else {
+          console.log(` Deduped /api/trackname for Device ${d0.id} idx ${index}`);
+        }
       } else if (serial && serial.isOpen) {
         // Legacy single-serial fallback
-        send(cmd);
-        console.log(`📤 [Serial] ← Track ${at}: "${name}"`);
+        if (shouldSendTrackname(0, index, escNorm)) send(cmd);
+        console.log(` [Serial] ← Track ${at}: "${name}"`);
       } else {
         throw new Error('No connected device to send trackname');
       }
     }
-    
+
     // Persist asynchronously; ignore errors
     try { fs.promises.writeFile(TRACK_NAMES_PATH, JSON.stringify(currentTrackNames, null, 2), 'utf8'); } catch {}
     res.json({ ok: true });
   } catch (e) { 
-    console.error('❌ /api/trackname error:', e);
+    console.error(' /api/trackname error:', e);
     res.status(400).json({ error: e.message }); 
   }
 });
+
 app.post('/api/activetrack', (req, res) => {
   try {
     const { index } = req.body || {};
-    if (index === undefined || `${index}`.trim() === '') throw new Error('Missing index');
-    
-    // Send to all connected devices (activetrack is typically broadcast)
+    if (!Number.isFinite(index)) throw new Error('Missing index');
+
     if (devices.length > 0) {
-      console.log(`📢 Broadcasting ACTIVETRACK ${index} to all ${devices.length} devices`);
-      sendToAll(`/activetrack ${index}\n`);
+      const deviceId = Math.floor(index / 8);
+      const localIndex = index % 8;
+      const targetDevice = devices.find(d => d.id === deviceId);
+      if (targetDevice) {
+        console.log(`📢 Routing ACTIVETRACK ${index} → Device ${deviceId} (local ${localIndex})`);
+        // Send selection to target device
+        sendToDevice(deviceId, `/activetrack ${localIndex}\n`);
+        // Clear selection on all other devices
+        devices.filter(d => d.id !== deviceId && d.serial && d.serial.isOpen)
+               .forEach(d => sendToDevice(d.id, `/activetrack -1\n`));
+      } else if (devices.length === 1) {
+        console.log(`📢 Single device present; sending local index ${localIndex}`);
+        sendToDevice(devices[0].id, `/activetrack ${localIndex}\n`);
+      } else {
+        console.log(`📢 No exact device match; clearing all`);
+        sendToAll(`/activetrack -1\n`);
+      }
     } else {
       send(`/activetrack ${index}\n`);
     }
-    
+
     res.json({ ok: true });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) {
+    console.error('❌ /api/activetrack error:', e);
+    res.status(400).json({ error: e.message });
+  }
 });
 
 app.post('/api/send', (req, res) => {
@@ -1170,6 +1300,11 @@ app.post('/api/osc-send', (req, res) => {
   try {
     const { address, args } = req.body || {};
     if (!address) throw new Error('Missing OSC address');
+    // Debounce /reannounce triggered from UI/API
+    if (address === '/reannounce') {
+      requestReannounce();
+      return res.json({ ok: true, message: 'Debounced /reannounce' });
+    }
     
     const port = initOSC();
     if (!port) throw new Error('OSC not initialized');
@@ -1408,27 +1543,51 @@ wss.on('connection', ws => {
 async function autoConnectDevices() {
   try {
     const ports = await listPorts();
-    const tds8Ports = ports.filter(p => {
-      const mfg = (p.manufacturer || '').toLowerCase();
-      const desc = (p.pnpId || '').toLowerCase();
-      const vendor = (p.vendorId || '').toLowerCase();
-      const product = (p.productId || '').toLowerCase();
-      
-      // XIAO ESP32-C3 uses CP2102N USB-to-UART bridge
-      // VID: 10C4 (Silicon Labs), PID: EA60 (CP210x)
-      const isCP2102 = vendor === '10c4' && product === 'ea60';
-      const hasCP210x = mfg.includes('silicon labs') || desc.includes('cp210');
-      
-      return isCP2102 || hasCP210x;
+    let tds8Ports = ports.filter(p => {
+      const vid = (p.vendorId || '').toUpperCase();
+      const pid = (p.productId || '').toUpperCase();
+      const manu = (p.manufacturer || '').toLowerCase();
+      const label = (p.pnpId || '').toLowerCase();
+      // Match ESP32-C3 default, Arduino/Seeed labels, and common CH340 chips
+      const isEsp32C3 = (vid === '303A' && pid === '1001');
+      const isArduino = manu.includes('arduino') || label.includes('arduino');
+      const isSeeed = manu.includes('seeed') || label.includes('seeed');
+      const isCH340 = (vid === '1A86');
+      const isCP210x = (vid === '10C4') || manu.includes('silicon labs') || label.includes('cp210');
+      return isEsp32C3 || isArduino || isSeeed || isCH340 || isCP210x;
     });
+    // Fallback: if no matches, try any COM* ports on Windows
+    if (tds8Ports.length === 0 && process.platform === 'win32') {
+      try {
+        await new Promise((resolve) => {
+          const cmd = 'powershell -NoProfile -Command "try { Get-CimInstance Win32_SerialPort | Select-Object -ExpandProperty DeviceID } catch { try { Get-WmiObject Win32_SerialPort | Select-Object -ExpandProperty DeviceID } catch {} }"';
+          exec(cmd, { windowsHide: true, timeout: 4000 }, (err, stdout) => {
+            if (!err && stdout) {
+              const lines = stdout.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+              const extra = lines.filter(s => /^COM\d+$/i.test(s)).map(id => ({ path: id }));
+              if (extra.length > 0) {
+                console.log('➕ AutoConnect: discovered COM ports via PowerShell:', extra.map(e => e.path));
+                // Merge any not already in listPorts()
+                const known = new Set(ports.map(p => p.path));
+                tds8Ports = extra.filter(e => !known.has(e.path)).concat(ports);
+              }
+            }
+            resolve();
+          });
+        });
+      } catch {}
+      // Final fallback: use all ports if still nothing
+      if (tds8Ports.length === 0) tds8Ports = ports;
+    }
     
     console.log(`🔍 Found ${tds8Ports.length} potential TDS-8 device(s)`);
     
     for (const port of tds8Ports) {
       // Check if already connected
       const alreadyConnected = devices.find(d => d.path === port.path);
-      if (alreadyConnected) {
-        console.log(`⏭️  ${port.path} already connected as Device ${alreadyConnected.id + 1}`);
+      if (alreadyConnected || connectingPorts.has(port.path)) {
+        if (alreadyConnected) console.log(`⏭️  ${port.path} already connected as Device ${alreadyConnected.id}`);
+        if (connectingPorts.has(port.path)) console.log(`⏳ ${port.path} connection in progress...`);
         continue;
       }
       
@@ -1451,7 +1610,13 @@ async function autoConnectDevices() {
         console.log(`🆕 Auto-connect assigning new Device ID ${deviceId} to ${port.path}`);
       }
       
+      if (deviceId === undefined) {
+        console.log(`🚫 No available Device ID for ${port.path}, skipping auto-connect`);
+        continue;
+      }
+
       console.log(`🔌 Auto-connecting ${port.path} as Device ${deviceId + 1}...`);
+      connectingPorts.add(port.path); // Add to connecting set
       
       try {
         const newSerial = new SerialPortStream({ binding: Bindings, path: port.path, baudRate: BAUD });
@@ -1475,6 +1640,7 @@ async function autoConnectDevices() {
           console.log(`🔌 Device ${deviceId} disconnected: ${port.path}`);
           const index = devices.findIndex(d => d.id === deviceId);
           if (index !== -1) devices.splice(index, 1);
+          connectingPorts.delete(port.path); // Remove from connecting set on close
         });
         
         // Send DEVICE_ID and VERSION commands with retry
@@ -1495,6 +1661,7 @@ async function autoConnectDevices() {
         
       } catch (err) {
         console.error(`❌ Failed to auto-connect ${port.path}:`, err.message);
+        connectingPorts.delete(port.path); // Remove from connecting set on error
       }
     }
   } catch (err) {
