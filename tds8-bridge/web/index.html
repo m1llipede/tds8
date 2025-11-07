@@ -93,7 +93,6 @@ select.input{cursor:pointer}
           <div class="hdr" style="display:flex;justify-content:space-between;align-items:center">
             <h1>🎛️ TDS-8 Devices</h1>
             <div style="display:flex;gap:8px;align-items:center">
-              <button id="btnFirmwareTop" class="btn secondary sm" title="Check for Firmware Updates" style="background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3);padding:4px 10px;font-size:11px">⬇️ Firmware</button>
               <button id="btnRefreshDevices" class="btn ghost sm" style="background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3);padding:4px 10px;font-size:11px">🔄 Refresh</button>
             </div>
           </div>
@@ -177,29 +176,115 @@ select.input{cursor:pointer}
               <div><code>/ipupdate</code> - device IP update (WiFi mode)</div>
             </div>
             <div class="divider"></div>
-            <div id="fwBox">
-              <div style="font-weight:600;margin-bottom:6px">⬇️ Firmware Update (USB)</div>
-              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                <input id="fwUrl" class="input" placeholder="Paste GitHub firmware URL (.bin)" style="flex:1;min-width:260px;font-size:12px;padding:6px 8px" autocomplete="off" autocapitalize="off" spellcheck="false"/>
-                <select id="fwDeviceSelect" class="input" style="width:180px;font-size:12px;padding:6px 8px"></select>
-                <button id="btnFlash" class="btn secondary sm">Flash</button>
-              </div>
-              <div style="font-size:11px;color:#6b7280;margin-top:6px">Accepts direct .bin URLs (GitHub release assets or raw.githubusercontent.com). Device will reboot after flashing.</div>
-            </div>
           </div>
         </div>
       </div>
 
     </div>
     
-    <!-- Footer -->
-    <div class="footer-info">
-      <div class="company">PlayOptix, LLC</div>
-      <div class="serial" id="footerSerial">Serial Number: Loading...</div>
-    </div>
-  </div>
+      </div>
+    <!-- Connection Status Banner (hidden; controls moved below Serial Monitor) -->
+    <div id="connectionBanner" style="display:none"></div>
+    
+    <div class="main-grid">
+      <!-- Left Column -->
+      <div class="left-col">
+        
+        <!-- Devices -->
+        <div class="card">
+          <div class="hdr" style="display:flex;justify-content:space-between;align-items:center">
+            <h1>🎛️ TDS-8 Devices</h1>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button id="btnRefreshDevices" class="btn ghost sm" style="background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3);padding:4px 10px;font-size:11px">🔄 Refresh</button>
+            </div>
+          </div>
+          <div class="body">
+            <div id="deviceList" class="device-list">
+              <div style="text-align:center;padding:12px;color:var(--muted);font-size:12px">
+                Scanning for devices...
+              </div>
+            </div>
+            
+          </div>
+        </div>
 
-  <!-- Wi-Fi Modal (legacy - removed) -->
+        <!-- Track Names -->
+        <div class="card">
+          <div class="hdr" style="display:flex;justify-content:space-between;align-items:center"><h1>🎵 Track Names</h1></div>
+          <div class="body" style="display:flex;flex-direction:column;min-height:0;max-height:500px;overflow-y:auto;">
+            <div class="btn-group" id="trackBtnGroup" style="margin-bottom:12px"></div>
+            <!-- Offset Controls (hidden for now) -->
+            <div style="display:none"></div>
+            
+            <div class="trackgrid" id="tracks" style="overflow-y:auto;max-height:320px;"></div>
+            <div class="divider"></div>
+            <div class="btn-group" style="margin-bottom:8px">
+              <button id="btnRefresh" class="btn primary">🔄 Refresh from Ableton</button>
+              <button id="btnSendAll" class="btn ghost sm">Update All Tracks</button>
+              <button id="btnResetTracks" class="btn ghost sm">Clear All Tracks</button>
+              <button id="btnSaveTracks" class="btn secondary sm">Save Current Tracks</button>
+              <button id="btnReadTracks" class="btn secondary sm">Load Stored Tracks</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Right Column - Serial Monitor -->
+      <div class="right-col">
+        <div class="card flex serial-card">
+          <div class="hdr" style="display:flex;align-items:center">
+            <h1 style="margin:0">📟 Serial Monitor</h1>
+            <div style="display:flex;align-items:center;gap:10px;margin-left:auto">
+              <span style="font-size:11px;color:#fff;opacity:0.9">v103025-16</span>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                <input type="checkbox" id="autoScroll" checked style="cursor:pointer"/>
+                Auto-scroll
+              </label>
+            </div>
+          </div>
+          <div class="body flex">
+            <div id="log" class="log"></div>
+            <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <input id="cmd" class="input" placeholder="Send command... (defaults to ALL devices)" style="flex:1;font-size:12px;padding:6px 8px" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" inputmode="text" name="tds8_command"/>
+              <button id="btnSend" class="btn ghost sm">Send</button>
+              <div class="btn-group" style="gap:6px">
+                <button id="qaRebootAll" class="btn sm ghost" title="Reboot all devices">Reboot All</button>
+                <button id="qaVersionAll" class="btn sm ghost" title="Request version from all devices">Version All</button>
+              </div>
+            </div>
+            <!-- Compact Connection Controls (moved here) -->
+            <div style="margin-top:12px">
+              <div style="font-size:12px;font-weight:600;color:#374151;text-align:center;margin-bottom:6px">TDS-8 Connection</div>
+              <div style="display:flex;gap:10px;align-items:center;justify-content:center">
+                <select id="connectionTypeSelect" class="input" style="padding:6px 10px;width:140px;display:none">
+                  <option value="wired">Wired (USB)</option>
+                  <option value="wifi">WiFi</option>
+                </select>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <div style="font-size:11px;color:#6b7280">IP:</div>
+                  <div id="connectionIP" style="font-family:ui-monospace,monospace;font-size:12px;font-weight:600;padding:4px 8px;background:#eef2ff;border-radius:6px;border:1px solid #c7d2fe">—</div>
+                </div>
+              </div>
+            </div>
+            <div class="helpbox">
+              <div style="font-weight:600;margin-bottom:6px">Commands quick reference</div>
+              <div>VERSION - request version</div>
+              <div>REBOOT - reboot device</div>
+              <div style="margin-top:12px;font-weight:600">Ableton Messages over OSC</div>
+              <div><code>/reannounce</code></div>
+              <div><code>/hello</code></div>
+              <div><code>/trackname index "Name" actualTrack</code> - Example: <code>/trackname 0 "Kick" 0</code></div>
+              <div><code>/ipupdate</code> - device IP update (WiFi mode)</div>
+            </div>
+            <div class="divider"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    
+    <!-- Wi-Fi Modal (legacy - removed) -->
 
   <!-- Add Network Modal -->
   <div id="modalAddNetwork" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:1001;padding:20px;overflow:auto">
@@ -226,24 +311,6 @@ select.input{cursor:pointer}
     </div>
   </div>
 
-  <!-- Firmware Modal -->
-  <div id="modalFirmware" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:1000;padding:20px;overflow:auto">
-    <div style="max-width:500px;margin:60px auto;background:white;border-radius:10px;overflow:hidden">
-      <div class="hdr"><h1>⬇️ Firmware Updates</h1></div>
-      <div class="body">
-        <div id="firmwareStatus" style="text-align:center;padding:20px">
-          <div style="font-size:48px;margin-bottom:12px">🔍</div>
-          <p style="color:var(--muted);font-size:13px">Click Check for Updates to begin</p>
-        </div>
-        
-        <div class="btn-group" style="justify-content:center">
-          <button id="btnCheck" class="btn primary">Check for Updates</button>
-          <button id="btnOta" class="btn secondary" style="display:none">Install Update</button>
-          <button id="btnCloseFirmware" class="btn ghost">Close</button>
-        </div>
-      </div>
-    </div>
-  </div>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -275,6 +342,7 @@ let currentConnectionIP = '—';
 let deviceVersions = new Map(); // Store firmware versions by port path
 let deviceIdMap = new Map(); // Map serial numbers to device IDs for persistence
 let isM4LConnected = false;
+let firmwareReleases = []; // Cache for GitHub releases
 
 function updateM4LStatus(isConnected) {
   isM4LConnected = isConnected;
@@ -351,11 +419,6 @@ function log(msg, type = 'info') {
   }
 }
 
-function updateFooterSerial(serialNum) {
-  deviceSerialNumber = serialNum || 'Unknown';
-  $('#footerSerial').textContent = `Serial Number: ${deviceSerialNumber}`;
-}
-
 function updateConnectionStatus(connected) {
   const statusEl = $('#statusText');
   if (statusEl) {
@@ -385,8 +448,7 @@ async function scanDevices() {
     
     if (!Array.isArray(ports) || ports.length === 0) {
       list.innerHTML = '<div style="text-align:center;padding:12px;color:var(--muted);font-size:12px">No TDS-8 devices found. Please connect via USB.<br><small style="color:#888">Try clicking Refresh or use manual COM connect below.</small></div>';
-      updateFooterSerial(null);
-      return;
+            return;
     }
   
   ports.forEach((p, idx) => {
@@ -421,23 +483,25 @@ async function scanDevices() {
     ).join('');
     
     item.innerHTML = `
-      <div style="display:flex;align-items:center;gap:12px;flex:1">
-        <div>
-          <div class="device-name">${displayName}${versionBadge}</div>
-          ${statusText}
-          <div class="m4l-status" style="font-size:11px;margin-top:2px">${isM4LConnected ? '<span style="color:#10b981;">🎵 M4L Connected</span>' : '<span style="color:#ef4444;">⚠️ M4L Disconnected</span>'}</div>
+      <div style="display:flex;flex-direction:column;flex:1;gap:8px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="flex:1;">
+            <div class="device-name">${displayName}${versionBadge}</div>
+            ${statusText}
+            <div class="m4l-status" style="font-size:11px;margin-top:2px">${isM4LConnected ? '<span style="color:#10b981;">🎵 M4L Connected</span>' : '<span style="color:#ef4444;">⚠️ M4L Disconnected</span>'}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            ${!isConnected ? 
+              `<select class="input sm" style="width:140px;font-size:11px;padding:4px 6px" data-path="${p.path}">
+                ${deviceIdOptions}
+              </select>` : ''
+            }
+            ${isConnected ? 
+              `<button class="btn ghost sm" onclick="disconnect('${p.path}')">Disconnect</button>` :
+              `<button class="btn primary sm" onclick="connect('${p.path}', '${deviceName}', '${p.serialNumber || ''}')">Connect</button>`
+            }
+          </div>
         </div>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px">
-        ${!isConnected ? 
-          `<select class="input sm" style="width:140px;font-size:11px;padding:4px 6px" data-path="${p.path}">
-            ${deviceIdOptions}
-          </select>` : ''
-        }
-        ${isConnected ? 
-          `<button class="btn ghost sm" onclick="disconnect('${p.path}')">Disconnect</button>` :
-          `<button class="btn primary sm" onclick="connect('${p.path}', '${deviceName}', '${p.serialNumber || ''}')">Connect</button>`
-        }
       </div>
     `;
     
@@ -451,11 +515,6 @@ async function scanDevices() {
     };
     
     list.appendChild(item);
-    
-    // Update footer with serial number if connected
-    if (isConnected && p.serialNumber) {
-      updateFooterSerial(p.serialNumber);
-    }
     
     // Device ID selector - priority: saved by serial -> connected info -> auto by list order
     let selectedDeviceId = null;
@@ -479,6 +538,7 @@ async function scanDevices() {
   });
   
   // end of scanDevices list rendering
+  buildFirmwareDeviceSelect();
   } catch (err) {
     log(`✗ Error scanning devices: ${err.message}`, 'err');
     console.error('Scan error:', err);
@@ -531,7 +591,6 @@ async function connect(path, name, serialNum, retryCount = 0) {
     if (j.ok) {
       connectedDevices.set(path, { name, path, serialNum, deviceId, trackRange });
       currentDevice = path;
-      updateFooterSerial(serialNum);
       updateConnectionStatus(true);
       updateConnectionBanner('wired', '127.0.0.1');
       
@@ -575,8 +634,7 @@ function disconnect(path) {
   connectedDevices.delete(path);
   if (currentDevice === path) {
     currentDevice = null;
-    updateFooterSerial(null);
-    updateConnectionStatus(false);
+        updateConnectionStatus(false);
     updateConnectionBanner('none', '—');
     // Reset connection UI (legacy WiFi elements removed)
     // const wifiStatus = $('#wifiStatus');
@@ -593,6 +651,7 @@ function disconnect(path) {
   }
   log(`✓ Disconnected from device - Serial port released for Arduino IDE`, 'info');
   scanDevices();
+  buildFirmwareDeviceSelect();
 }
 
 // ----- Track Names -----
@@ -722,7 +781,108 @@ async function saveTracksToBridge() {
   }
 }
 
-// All button handlers moved to DOMContentLoaded
+function updateConnectionStatus(connected) {
+  const statusEl = $('#statusText');
+  if (statusEl) {
+    if (connected) {
+      statusEl.textContent = '🔌 Connected';
+      statusEl.style.color = '#10b981';
+    } else {
+      statusEl.textContent = 'Disconnected';
+      statusEl.style.color = 'var(--muted)';
+    }
+  }
+}
+
+// ----- Firmware ----- 
+async function fetchFirmwareReleases() {
+  try {
+    log('⬇️ Fetching firmware releases from GitHub...', 'info');
+    const res = await fetch('/api/firmware/releases');
+    if (!res.ok) {
+      throw new Error(`Failed to fetch releases: ${res.statusText}`);
+    }
+    const releases = await res.json();
+    
+    // Filter for releases that have .bin assets and store them
+    firmwareReleases = releases
+      .map(release => ({
+        name: release.name,
+        tag_name: release.tag_name,
+        assets: release.assets.filter(asset => asset.name.endsWith('.bin'))
+      }))
+      .filter(release => release.assets.length > 0);
+
+    log(`✅ Found ${firmwareReleases.length} firmware releases with .bin files.`, 'info');
+    
+    // After fetching, update any visible dropdowns
+    // Removed updateAllFirmwareDropdowns();
+
+  } catch (err) {
+    log(`✗ Error fetching firmware: ${err.message}`, 'err');
+    console.error('Firmware fetch error:', err);
+  }
+}
+
+// Removed updateAllFirmwareDropdowns();
+
+async function fetchFirmwareReleases() {
+  const select = document.getElementById('fwUrl');
+  try {
+    const res = await fetch('/api/firmware/releases');
+    const data = await res.json();
+    if (data.ok && data.releases) {
+      select.innerHTML = '<option value="">Select a firmware version...</option>';
+      data.releases.forEach(release => {
+        release.assets.forEach(asset => {
+          const option = document.createElement('option');
+          option.value = asset.browser_download_url;
+          option.textContent = `${release.name} - ${asset.name}`;
+          select.appendChild(option);
+        });
+      });
+    } else {
+      throw new Error(data.error || 'No releases found');
+    }
+  } catch (err) {
+    select.innerHTML = `<option value="">Error: ${err.message}</option>`;
+    log(`✗ Could not load firmware releases: ${err.message}`, 'err');
+  }
+}
+
+function buildFirmwareDeviceSelect() {
+  const sel = document.getElementById('fwDeviceSelect');
+  if (!sel) return;
+  const currentVal = sel.value;
+  sel.innerHTML = '';
+  if (connectedDevices.size === 0) {
+    sel.innerHTML = '<option value="">No devices connected</option>';
+    return;
+  }
+  connectedDevices.forEach((device, path) => {
+    const option = document.createElement('option');
+    option.value = path;
+    option.textContent = `${device.name || `Device ${device.deviceId + 1}`} (${path})`;
+    sel.appendChild(option);
+  });
+  sel.value = currentVal;
+}
+
+// Load saved networks from localStorage
+function loadSavedNetworks() {
+  const saved = localStorage.getItem('tds8_wifi_networks');
+  if (saved) {
+    try {
+      savedWifiNetworks = JSON.parse(saved);
+    } catch (e) {
+      savedWifiNetworks = [];
+    }
+  }
+}
+
+function saveSavedNetworks() {
+  localStorage.setItem('tds8_wifi_networks', JSON.stringify(savedWifiNetworks));
+}
 
 async function fetchTrackNames() {
   try {
@@ -1238,8 +1398,7 @@ async function flashFirmware() {
       if (msg.path && typeof msg.deviceId === 'number') {
         connectedDevices.set(msg.path, { deviceId: msg.deviceId, trackRange: msg.trackRange || `${msg.deviceId * 8 + 1}-${(msg.deviceId + 1) * 8}` });
         currentDevice = msg.path;
-        updateFooterSerial(null);
-        updateConnectionStatus(true);
+                updateConnectionStatus(true);
         scanDevices();
         buildTrackGrid();
         buildFirmwareDeviceSelect();
@@ -1366,6 +1525,58 @@ async function checkDeviceStatus() {
 
 // ----- Init -----
 window.addEventListener('DOMContentLoaded', () => {
+  fetchFirmwareReleases(); // Fetch releases as soon as the page is ready
+
+  $('#deviceList').addEventListener('click', async (e) => {
+    if (e.target.classList.contains('btn-flash')) {
+      const path = e.target.dataset.path;
+      const select = document.querySelector(`.fw-select[data-path="${path}"]`);
+      const url = select ? select.value : null;
+      const releaseName = select ? (select.options[select.selectedIndex] || {}).textContent : 'N/A';
+
+      if (!url) {
+        log('⚠️ Please select a firmware version first.', 'err');
+        alert('Please select a firmware version from the dropdown.');
+        return;
+      }
+
+      if (!confirm(`Are you sure you want to flash "${releaseName}" to device ${path}?\n\nThis process can take up to a minute and the device will reboot.`)) {
+        return;
+      }
+
+      log(`⚡ Starting firmware flash for ${path}...`, 'info');
+      log(`   Firmware: ${releaseName}`, 'info');
+      e.target.disabled = true;
+      e.target.textContent = 'Flashing...';
+
+      try {
+        const res = await fetch('/api/firmware/flash', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ path, url })
+        });
+
+        const result = await res.json();
+
+        if (result.ok) {
+          log(`✅ Firmware flash successful for ${path}! Device is rebooting.`, 'out');
+          alert('Firmware update complete! The device will now reboot.');
+        } else {
+          throw new Error(result.error || 'Unknown error during flashing.');
+        }
+      } catch (err) {
+        log(`✗ Firmware flash failed: ${err.message}`, 'err');
+        console.error('Flash error:', err);
+        alert(`Firmware update failed:\n\n${err.message}`);
+      } finally {
+        e.target.disabled = false;
+        e.target.textContent = '⚡ Update';
+        // Refresh device list to reflect potential version changes after reboot
+        setTimeout(scanDevices, 3000);
+      }
+    }
+  });
+
   log('TDS-8 Control ready', 'info');
   
   buildTrackGrid();
@@ -1558,7 +1769,7 @@ window.addEventListener('DOMContentLoaded', () => {
       if (ssidDropdown) {
         // Check if the saved SSID is already in the dropdown
         let found = false;
-        for (let i = 0; i < ssidDropdown.options.length; i++) {
+        for (let i = 0; i <ssidDropdown.options.length; i++) {
           if (ssidDropdown.options[i].value === savedSsid) {
             ssidDropdown.selectedIndex = i;
             found = true;

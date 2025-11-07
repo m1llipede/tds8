@@ -11,6 +11,8 @@ const osc = require('osc');
 const { exec } = require('child_process');
 const { SerialPortStream } = require('@serialport/stream');
 const { autoDetect } = require('@serialport/bindings-cpp');
+const axios = require('axios');
+const tmp = require('tmp');
 
 const PORT = process.env.PORT || 8088;
 const OSC_LISTEN_PORT = parseInt(process.env.OSC_LISTEN_PORT || '8003', 10);  // Changed to 8003 to avoid blocking
@@ -418,6 +420,101 @@ console.log('========================================\n');
 app.use(express.json({ limit: '10mb' }));
 app.use(morgan('dev'));
 app.use(express.static(path.join(__dirname, 'web')));
+
+app.post('/api/firmware/flash', async (req, res) => {
+  const { devicePath, firmwareUrl } = req.body;
+  if (!devicePath || !firmwareUrl) {
+    return res.status(400).json({ ok: false, error: 'Missing device path or firmware URL.' });
+  }
+
+  const device = devices.find(d => d.path === devicePath);
+  if (!device) {
+    return res.status(404).json({ ok: false, error: 'Device not found or not connected.' });
+  }
+
+  // 1. Disconnect the device to free up the serial port
+  uiLog(`[FLASH] Disconnecting ${devicePath} to begin flashing...`);
+  try {
+    if (device.serial && device.serial.isOpen) {
+      await new Promise(resolve => device.serial.close(resolve));
+    }
+    // Remove from our active list
+    devices = devices.filter(d => d.path !== devicePath);
+    wsBroadcast({ type: 'serial-close', path: devicePath }); // Notify UI
+    uiLog(`[FLASH] Port ${devicePath} is now free.`);
+  } catch (e) {
+    console.error(`[FLASH] Error closing port ${devicePath}:`, e);
+    return res.status(500).json({ ok: false, error: `Failed to close serial port: ${e.message}` });
+  }
+
+  // 2. Download firmware to a temporary file
+  let tmpFile;
+  try {
+    uiLog(`[FLASH] Downloading firmware from ${firmwareUrl}...`);
+    const response = await axios.get(firmwareUrl, { responseType: 'arraybuffer' });
+    tmpFile = tmp.fileSync({ postfix: '.bin' });
+    fs.writeFileSync(tmpFile.name, response.data);
+    uiLog(`[FLASH] Firmware saved to temporary file: ${tmpFile.name}`);
+  } catch (e) {
+    console.error(`[FLASH] Firmware download failed:`, e);
+    if (tmpFile) tmpFile.removeCallback();
+    return res.status(500).json({ ok: false, error: `Firmware download failed: ${e.message}` });
+  }
+
+  // 3. Execute esptool.py
+  const esptoolCommand = `python -m esptool --chip esp32c3 --port ${devicePath} --baud 115200 write_flash -z 0x0 ${tmpFile.name}`;
+  uiLog(`[FLASH] Executing: ${esptoolCommand}`);
+  const child = exec(esptoolCommand);
+
+  child.stdout.on('data', (data) => {
+    const output = data.toString();
+    console.log(`[esptool]: ${output.trim()}`);
+    uiLog(`[esptool] ${output.trim()}`);
+  });
+  child.stderr.on('data', (data) => {
+    const output = data.toString();
+    console.error(`[esptool]: ${output.trim()}`);
+    uiLog(`[esptool] ${output.trim()}`);
+  });
+
+  child.on('close', (code) => {
+    uiLog(`[FLASH] esptool.py process finished with exit code ${code}.`);
+    tmpFile.removeCallback(); // Clean up the temporary file
+
+    if (code === 0) {
+      uiLog(`[FLASH] Firmware update successful! Device will reboot.`);
+      res.json({ ok: true, message: 'Flash successful!' });
+    } else {
+      uiLog(`[FLASH] esptool.py failed. Please check the log.`);
+      res.status(500).json({ ok: false, error: 'esptool.py failed. See log for details.' });
+    }
+    // The frontend's periodic scan will pick up the device after it reboots.
+  });
+});
+
+app.get('/api/firmware/releases', async (req, res) => {
+  try {
+    const response = await axios.get('https://api.github.com/repos/m1llipede/tds8/releases');
+    const releases = response.data.map(release => {
+      return {
+        name: release.name,
+        tag_name: release.tag_name,
+        assets: release.assets.filter(asset => asset.name.endsWith('.bin')).map(asset => {
+          return {
+            name: asset.name,
+            browser_download_url: asset.browser_download_url
+          }
+        })
+      }
+    }).filter(release => release.assets.length > 0);
+    res.json({ ok: true, releases });
+  } catch (error) {
+    console.error('Error fetching GitHub releases:', error.message);
+    res.status(500).json({ ok: false, error: 'Failed to fetch releases from GitHub' });
+  }
+});
+
+// API endpoint to fetch firmware releases from GitHub
 
 // Serve index.html at root
 app.get('/', (req, res) => {
