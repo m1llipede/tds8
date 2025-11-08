@@ -8,7 +8,7 @@ const morgan = require('morgan');
 const http = require('http');
 const WebSocket = require('ws');
 const osc = require('osc');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const { SerialPortStream } = require('@serialport/stream');
 const { autoDetect } = require('@serialport/bindings-cpp');
 const axios = require('axios');
@@ -27,6 +27,11 @@ const Bindings = autoDetect();
 // Multi-device support: Store up to 4 TDS-8 devices
 const MAX_DEVICES = 4;
 let devices = []; // Array of { id, serial, path, buffer, version, deviceID }
+// Track connection attempts and recent closes to avoid reset loops on ESP auto-boot
+const connectingPorts = new Set(); // ports currently being opened
+const portToDeviceId = new Map();  // sticky mapping of port -> deviceId
+const recentlyClosed = new Map();  // port -> timestamp of last close
+const RECONNECT_COOLDOWN_MS = 15000; // 15 second cooldown to prevent boot loop reconnects // wait before re-opening after a close
 
 // Global-level dedup keyed by actual track number (0..31)
 const lastGlobalTrack = new Map(); // key: globalIndex → { name, ts }
@@ -143,6 +148,7 @@ let abletonConnected = false;
 let abletonGreetingSent = false; // Flag to ensure one-time message
 let lastHiTime = 0;
 let lastHelloResponse = 0;
+let reannounceTimer = null; // debounce timer for /reannounce after device connects
 
 // Send OSC message to Ableton (M4L)
 function sendOSC(address, args = []) {
@@ -208,26 +214,27 @@ function initOSCListener() {
                 if (lastHiTime && (now - lastHiTime < 30000)) {
                     if (!abletonGreetingSent) {
                         console.log('✅ Ableton connection confirmed via /hi handshake');
-                        // Send a one-time alert to all connected devices
                         sendToAll(`ALERT "Ableton Connected!" 1000\n`);
-                        abletonGreetingSent = true; // Set flag to prevent re-sending
+                        requestReannounce();
+                        abletonGreetingSent = true;
                     }
                     abletonConnected = true;
                     wsBroadcast({ type: 'ableton-connected' });
                 } else {
                     if (abletonConnected) {
                         abletonConnected = false;
+                        abletonGreetingSent = false; // allow re-announce on next handshake
                         console.log('⚠️ Ableton disconnected (no /hi in 30s)');
                         wsBroadcast({ type: 'ableton-disconnected' });
                     }
                 }
             };
             
-            // Send first hello immediately after 2 seconds
+            // Send first hello quickly after startup
             setTimeout(() => {
                 console.log('🔔 Starting Ableton handshake...');
                 checkConnection();
-            }, 2000);
+            }, 300);
             
             // Then send /hello every 10 seconds
             setInterval(checkConnection, 10000);
@@ -552,9 +559,19 @@ async function openSerial(desiredPath) {
 
   serialPath = desiredPath;
   serial = new SerialPortStream({
-    binding: Bindings, path: desiredPath, baudRate: BAUD, autoOpen: false
+    binding: Bindings, 
+    path: desiredPath, 
+    baudRate: BAUD, 
+    autoOpen: false
   });
-  await new Promise((res, rej) => serial.open(err => err ? rej(err) : res()));
+  
+  await new Promise((res, rej) => {
+    serial.open((err) => {
+      if (err) return rej(err);
+      // Wait 1 second for device to stabilize after open
+      setTimeout(() => res(), 1000);
+    });
+  });
 
   serial.on('data', onSerialData);
   serial.on('error', e => wsBroadcast({ type: 'serial-error', message: e.message }));
@@ -562,8 +579,14 @@ async function openSerial(desiredPath) {
 
   wsBroadcast({ type: 'serial-open', path: serialPath, baud: BAUD });
   console.log(`Serial Port: ${serialPath} @ ${BAUD} baud`);
-  send('/reannounce\n'); 
-  send('VERSION\n');
+  
+  // Wait 3 seconds for device to finish booting before sending commands
+  setTimeout(() => {
+    if (serial && serial.isOpen) {
+      send('/reannounce\n'); 
+      send('VERSION\n');
+    }
+  }, 3000);
   return serialPath;
 }
 
@@ -610,6 +633,16 @@ function sendToAll(s) {
       uiLog(`[Device ${device.id}] SENT: ${s.trim()}`);
     }
   });
+}
+
+// Debounce sending /reannounce so we issue it once after a burst of device connections
+function scheduleReannounce(delay = 1200) {
+  try {
+    if (reannounceTimer) clearTimeout(reannounceTimer);
+    reannounceTimer = setTimeout(() => {
+      try { requestReannounce(); } catch (e) {}
+    }, delay);
+  } catch {}
 }
 
 // Multi-device: Handle serial data from specific device
@@ -840,8 +873,6 @@ app.get('/api/ports/all', async (_req, res) => {
 });
 
 // Map COM ports to device IDs (persistent across disconnects)
-const portToDeviceId = new Map();
-const connectingPorts = new Set(); // Prevent race conditions on auto-connect
 
 app.post('/api/connect', async (req, res) => {
   try {
@@ -880,7 +911,12 @@ app.post('/api/connect', async (req, res) => {
     }
     
     // Use consistent multi-device pattern for all devices (including first)
-    const newSerial = new SerialPortStream({ binding: Bindings, path: desired, baudRate: BAUD });
+    const newSerial = new SerialPortStream({ 
+      binding: Bindings, 
+      path: desired, 
+      baudRate: BAUD,
+      autoOpen: false
+    });
     
     const device = {
       id: deviceId,
@@ -890,6 +926,15 @@ app.post('/api/connect', async (req, res) => {
       version: null,
       deviceID: deviceId
     };
+    
+    // Open port with minimal intervention
+    await new Promise((resolve, reject) => {
+      newSerial.open((err) => {
+        if (err) return reject(err);
+        // Wait 1 second for device to stabilize
+        setTimeout(() => resolve(), 1000);
+      });
+    });
     
     devices.push(device);
     
@@ -917,8 +962,6 @@ app.post('/api/connect', async (req, res) => {
       deviceIP = '127.0.0.1';
     }
     
-    sendToDevice(deviceId, `DEVICE_ID ${deviceId}\n`);
-    sendToDevice(deviceId, 'VERSION\n');
     console.log(`✓ Connected: ${desired} → Device ID ${deviceId} (Tracks ${deviceId * 8 + 1}-${(deviceId + 1) * 8})`);
 
     // Broadcast device status to UI (wired mode)
@@ -931,6 +974,17 @@ app.post('/api/connect', async (req, res) => {
     
     wsBroadcast({ type: 'serial-open', path: desired, baud: BAUD });
     res.json({ ok: true, path: desired, baud: BAUD, deviceId });
+    // Request track names shortly after a manual connection
+    scheduleReannounce(600);
+    
+    // Wait 3 seconds for device boot before sending init commands
+    setTimeout(() => {
+      if (devices.find(d => d.id === deviceId && d.path === desired)) {
+        console.log(`📤 Sending init commands to Device ${deviceId + 1}...`);
+        sendToDevice(deviceId, `DEVICE_ID ${deviceId}\n`);
+        setTimeout(() => sendToDevice(deviceId, 'VERSION\n'), 500);
+      }
+    }, 3000);
   } catch (e) {
     console.error('CRITICAL: /api/connect error:', e);
     uiLog(`FATAL: Connection handler failed: ${e.message}`);
@@ -1523,8 +1577,13 @@ app.post('/api/ota-update', async (req, res) => {
 });
 
 // Flash firmware over USB using esptool (wired-only)
+let FLASH_IN_PROGRESS = false;
+
 app.post('/api/flash', async (req, res) => {
   try {
+    if (FLASH_IN_PROGRESS) {
+      return res.status(429).json({ ok: false, error: 'Another flash is in progress. Please wait.' });
+    }
     const { url, manifest, deviceId, path: portPathOverride } = req.body || {};
     let fwUrl = url;
     if (!fwUrl && manifest) {
@@ -1558,27 +1617,34 @@ app.post('/api/flash', async (req, res) => {
       }
     } catch {}
 
-    // Try python/esptool runners in order
+    // Try python/esptool runners in order (streamed, no maxBuffer)
+    const localEsptool = process.platform === 'win32' ? path.join(__dirname, 'bin', 'esptool.exe') : path.join(__dirname, 'bin', 'esptool');
     const runners = [
-      `python -m esptool --chip esp32c3 --port ${portPath} --baud 921600 write_flash -z 0x10000 "${fwPath}"`,
-      `py -m esptool --chip esp32c3 --port ${portPath} --baud 921600 write_flash -z 0x10000 "${fwPath}"`,
-      `python3 -m esptool --chip esp32c3 --port ${portPath} --baud 921600 write_flash -z 0x10000 "${fwPath}"`,
-      `esptool.py --chip esp32c3 --port ${portPath} --baud 921600 write_flash -z 0x10000 "${fwPath}"`
+      { cmd: localEsptool, args: ['--chip', 'esp32c3', '--port', portPath, '--baud', '921600', 'write_flash', '-z', '0x10000', fwPath] },
+      { cmd: 'python', args: ['-m', 'esptool', '--chip', 'esp32c3', '--port', portPath, '--baud', '921600', 'write_flash', '-z', '0x10000', fwPath] },
+      { cmd: 'py', args: ['-m', 'esptool', '--chip', 'esp32c3', '--port', portPath, '--baud', '921600', 'write_flash', '-z', '0x10000', fwPath] },
+      { cmd: 'python3', args: ['-m', 'esptool', '--chip', 'esp32c3', '--port', portPath, '--baud', '921600', 'write_flash', '-z', '0x10000', fwPath] },
+      { cmd: 'esptool.py', args: ['--chip', 'esp32c3', '--port', portPath, '--baud', '921600', 'write_flash', '-z', '0x10000', fwPath] }
     ];
 
+    FLASH_IN_PROGRESS = true;
     let lastErr = null;
-    for (const cmd of runners) {
+    for (const r of runners) {
       try {
-        uiLog(`[FLASH] Running: ${cmd}`);
+        uiLog(`[FLASH] Running: ${r.cmd} ${r.args.join(' ')}`);
         await new Promise((resolve, reject) => {
-          exec(cmd, { windowsHide: true, timeout: 240000 }, (err, stdout, stderr) => {
-            if (stdout) uiLog(stdout);
-            if (stderr) uiLog(stderr);
-            if (err) return reject(err);
-            resolve();
+          const child = spawn(r.cmd, r.args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+          let done = false;
+          const finish = (err) => { if (!done) { done = true; err ? reject(err) : resolve(); } };
+          child.stdout.on('data', d => { const t = d.toString(); if (t.trim()) uiLog(t); });
+          child.stderr.on('data', d => { const t = d.toString(); if (t.trim()) uiLog(t); });
+          child.on('error', e => finish(e));
+          child.on('close', code => {
+            if (code === 0) finish(); else finish(new Error(`esptool exit ${code}`));
           });
         });
         uiLog('[FLASH] Completed successfully. Device will reboot.');
+        FLASH_IN_PROGRESS = false;
         return res.json({ ok: true });
       } catch (e) {
         lastErr = e;
@@ -1586,6 +1652,7 @@ app.post('/api/flash', async (req, res) => {
         continue;
       }
     }
+    FLASH_IN_PROGRESS = false;
     throw new Error(lastErr ? lastErr.message : 'Unknown flashing error');
   } catch (e) {
     console.error('Flash error:', e);
@@ -1639,6 +1706,7 @@ wss.on('connection', ws => {
 // Auto-connect to all TDS-8 devices
 async function autoConnectDevices() {
   try {
+    const now = Date.now();
     const ports = await listPorts();
     let tds8Ports = ports.filter(p => {
       const vid = (p.vendorId || '').toUpperCase();
@@ -1682,6 +1750,13 @@ async function autoConnectDevices() {
     for (const port of tds8Ports) {
       // Check if already connected
       const alreadyConnected = devices.find(d => d.path === port.path);
+      // Respect cooldown if this port was just closed (common during reboot)
+      const lastClosed = recentlyClosed.get(port.path) || 0;
+      const coolingDown = (now - lastClosed) < RECONNECT_COOLDOWN_MS;
+      if (coolingDown) {
+        console.log(`⏳ Skipping ${port.path} (cooldown ${(RECONNECT_COOLDOWN_MS - (now - lastClosed))}ms)`);
+        continue;
+      }
       if (alreadyConnected || connectingPorts.has(port.path)) {
         if (alreadyConnected) console.log(`⏭️  ${port.path} already connected as Device ${alreadyConnected.id}`);
         if (connectingPorts.has(port.path)) console.log(`⏳ ${port.path} connection in progress...`);
@@ -1716,7 +1791,12 @@ async function autoConnectDevices() {
       connectingPorts.add(port.path); // Add to connecting set
       
       try {
-        const newSerial = new SerialPortStream({ binding: Bindings, path: port.path, baudRate: BAUD });
+        const newSerial = new SerialPortStream({ 
+          binding: Bindings, 
+          path: port.path, 
+          baudRate: BAUD,
+          autoOpen: false
+        });
         
         const device = {
           id: deviceId,
@@ -1726,6 +1806,10 @@ async function autoConnectDevices() {
           version: null,
           deviceID: deviceId
         };
+        
+        // Open port and wait for stabilization
+        await newSerial.open();
+        await new Promise(res => setTimeout(res, 1000));
         
         devices.push(device);
         
@@ -1737,24 +1821,25 @@ async function autoConnectDevices() {
           console.log(`🔌 Device ${deviceId} disconnected: ${port.path}`);
           const index = devices.findIndex(d => d.id === deviceId);
           if (index !== -1) devices.splice(index, 1);
-          connectingPorts.delete(port.path); // Remove from connecting set on close
+          // Do NOT auto-reconnect - let user manually reconnect like Arduino IDE
+          recentlyClosed.set(port.path, Date.now());
+          connectingPorts.delete(port.path);
+          wsBroadcast({ type: 'device-disconnected', deviceId, path: port.path });
         });
         
-        // Send DEVICE_ID and VERSION commands with retry
+        console.log(`✅ Auto-connected: ${port.path} → Device ${deviceId + 1} (Tracks ${deviceId * 8 + 1}-${(deviceId + 1) * 8})`);
+        wsBroadcast({ type: 'device-connected', deviceId, path: port.path, trackRange: `${deviceId * 8 + 1}-${(deviceId + 1) * 8}` });
+        // Request track names shortly after connections settle
+        scheduleReannounce(600);
+        
+        // Wait 3 seconds for device boot before sending init commands
         setTimeout(() => {
-          sendToDevice(deviceId, `DEVICE_ID ${deviceId}\n`);
-          sendToDevice(deviceId, 'VERSION\n');
-          console.log(`✅ Auto-connected: ${port.path} → Device ${deviceId + 1} (Tracks ${deviceId * 8 + 1}-${(deviceId + 1) * 8})`);
-          wsBroadcast({ type: 'device-connected', deviceId, path: port.path, trackRange: `${deviceId * 8 + 1}-${(deviceId + 1) * 8}` });
-          
-          // Retry VERSION command if no response after 3 seconds
-          setTimeout(() => {
-            if (!devices.find(d => d.id === deviceId && d.version)) {
-              console.log(`🔄 Retrying VERSION for Device ${deviceId + 1} (no response yet)`);
-              sendToDevice(deviceId, 'VERSION\n');
-            }
-          }, 3000);
-        }, 1000);
+          if (devices.find(d => d.id === deviceId && d.path === port.path)) {
+            console.log(`📤 Sending init commands to Device ${deviceId + 1}...`);
+            sendToDevice(deviceId, `DEVICE_ID ${deviceId}\n`);
+            setTimeout(() => sendToDevice(deviceId, 'VERSION\n'), 500);
+          }
+        }, 3000);
         
       } catch (err) {
         console.error(`❌ Failed to auto-connect ${port.path}:`, err.message);
@@ -1779,9 +1864,21 @@ server.listen(PORT, () => {
   console.log(`  M4L should listen on:   port ${M4L_PORT}`);
   console.log('========================================================\n');
   
-  // Auto-connect to devices on startup
-  setTimeout(autoConnectDevices, 2000);
-  
-  // Check for new devices every 5 seconds
-  setInterval(autoConnectDevices, 5000);
+  // Auto-connect scheduling (with safety delays)
+  // First scan shortly after startup, then periodic rescans
+  setTimeout(() => {
+    try {
+      console.log('🔍 Starting auto-connect scan...');
+      autoConnectDevices();
+    } catch (e) {
+      console.error('Auto-connect initial scan failed:', e.message);
+    }
+  }, 3000);
+  setInterval(() => {
+    try {
+      autoConnectDevices();
+    } catch (e) {
+      console.error('Auto-connect interval failed:', e.message);
+    }
+  }, 10000);
 });

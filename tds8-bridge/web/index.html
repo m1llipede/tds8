@@ -91,15 +91,19 @@ select.input{cursor:pointer}
         <!-- Devices -->
         <div class="card">
           <div class="hdr" style="display:flex;justify-content:space-between;align-items:center">
-            <h1>🎛️ TDS-8 Devices</h1>
+            <h1>TDS-8 Devices</h1>
             <div style="display:flex;gap:8px;align-items:center">
               <button id="btnRefreshDevices" class="btn ghost sm" style="background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3);padding:4px 10px;font-size:11px">🔄 Refresh</button>
             </div>
           </div>
           <div class="body">
             <div id="deviceList" class="device-list">
+              <div style="padding:8px 12px;background:#d1ecf1;border:2px solid #0c5460;border-radius:6px;margin-bottom:8px;font-size:11px;color:#0c5460">
+                <strong>💡 Manual Connect Mode</strong><br>
+                Click <strong>Refresh</strong> to scan, then <strong>Connect</strong> on each device
+              </div>
               <div style="text-align:center;padding:12px;color:var(--muted);font-size:12px">
-                Scanning for devices...
+                Click Refresh to scan for devices
               </div>
             </div>
             
@@ -108,7 +112,7 @@ select.input{cursor:pointer}
 
         <!-- Track Names -->
         <div class="card">
-          <div class="hdr" style="display:flex;justify-content:space-between;align-items:center"><h1>🎵 Track Names</h1></div>
+          <div class="hdr" style="display:flex;justify-content:space-between;align-items:center"><h1>Track Names</h1></div>
           <div class="body" style="display:flex;flex-direction:column;min-height:0;max-height:500px;overflow-y:auto;">
             <div class="btn-group" id="trackBtnGroup" style="margin-bottom:12px"></div>
             <!-- Offset Controls (hidden for now) -->
@@ -132,9 +136,9 @@ select.input{cursor:pointer}
       <div class="right-col">
         <div class="card flex serial-card">
           <div class="hdr" style="display:flex;align-items:center">
-            <h1 style="margin:0">📟 Serial Monitor</h1>
+            <h1 style="margin:0">Serial Monitor</h1>
             <div style="display:flex;align-items:center;gap:10px;margin-left:auto">
-              <span style="font-size:11px;color:#fff;opacity:0.9">v103025-16</span>
+              <span style="font-size:11px;color:#fff;opacity:0.9">v110725-05</span>
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
                 <input type="checkbox" id="autoScroll" checked style="cursor:pointer"/>
                 Auto-scroll
@@ -176,6 +180,27 @@ select.input{cursor:pointer}
               <div><code>/ipupdate</code> - device IP update (WiFi mode)</div>
             </div>
             <div class="divider"></div>
+            <!-- Firmware Update (below Serial Monitor) -->
+            <div style="margin-top:10px">
+              <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:8px">Firmware Update</div>
+              <div class="grid" style="grid-template-columns:1fr 1fr; gap:8px; align-items:end">
+                <div>
+                  <label for="fwUrl">Firmware Release / Asset</label>
+                  <select id="fwUrl" class="input" title="Select a firmware asset (.bin) from GitHub releases">
+                    <option value="">Loading releases…</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="fwDeviceSelect">Target Device</label>
+                  <select id="fwDeviceSelect" class="input" title="Select a connected TDS-8 device">
+                    <option value="">No devices connected</option>
+                  </select>
+                </div>
+              </div>
+              <div style="margin-top:8px; display:flex; gap:8px; justify-content:flex-end">
+                <button id="btnFlash" class="btn primary sm" onclick="flashFirmware()">Flash</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -200,8 +225,12 @@ select.input{cursor:pointer}
           </div>
           <div class="body">
             <div id="deviceList" class="device-list">
+              <div style="padding:8px 12px;background:#d1ecf1;border:2px solid #0c5460;border-radius:6px;margin-bottom:8px;font-size:11px;color:#0c5460">
+                <strong>💡 Manual Connect Mode</strong><br>
+                Click <strong>Refresh</strong> to scan, then <strong>Connect</strong> on each device
+              </div>
               <div style="text-align:center;padding:12px;color:var(--muted);font-size:12px">
-                Scanning for devices...
+                Click Refresh to scan for devices
               </div>
             </div>
             
@@ -236,7 +265,7 @@ select.input{cursor:pointer}
           <div class="hdr" style="display:flex;align-items:center">
             <h1 style="margin:0">📟 Serial Monitor</h1>
             <div style="display:flex;align-items:center;gap:10px;margin-left:auto">
-              <span style="font-size:11px;color:#fff;opacity:0.9">v103025-16</span>
+              <span style="font-size:11px;color:#fff;opacity:0.9">v110725-05</span>
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
                 <input type="checkbox" id="autoScroll" checked style="cursor:pointer"/>
                 Auto-scroll
@@ -278,6 +307,27 @@ select.input{cursor:pointer}
               <div><code>/ipupdate</code> - device IP update (WiFi mode)</div>
             </div>
             <div class="divider"></div>
+            <!-- Firmware Update (below Serial Monitor) -->
+            <div style="margin-top:10px">
+              <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:8px">Firmware Update</div>
+              <div class="grid" style="grid-template-columns:1fr 1fr; gap:8px; align-items:end">
+                <div>
+                  <label for="fwUrl">Firmware Release / Asset</label>
+                  <select id="fwUrl" class="input" title="Select a firmware asset (.bin) from GitHub releases">
+                    <option value="">Loading releases…</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="fwDeviceSelect">Target Device</label>
+                  <select id="fwDeviceSelect" class="input" title="Select a connected TDS-8 device">
+                    <option value="">No devices connected</option>
+                  </select>
+                </div>
+              </div>
+              <div style="margin-top:8px; display:flex; gap:8px; justify-content:flex-end">
+                <button id="btnFlash" class="btn primary sm" onclick="flashFirmware()">Flash</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -407,12 +457,11 @@ function saveSavedNetworks() {
 }
 
 function log(msg, type = 'info') {
+  if (!msg) return;
   const line = document.createElement('div');
   line.className = 'log-line ' + type;
-  line.textContent = msg;
+  line.textContent = String(msg);
   logEl.appendChild(line);
-  
-  // Auto-scroll if enabled; do it after layout to ensure it sticks
   if (autoScrollEnabled) {
     logEl.scrollTop = logEl.scrollHeight;
     requestAnimationFrame(() => { logEl.scrollTop = logEl.scrollHeight; });
