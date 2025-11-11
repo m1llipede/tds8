@@ -35,7 +35,7 @@ const RECONNECT_COOLDOWN_MS = 15000; // 15 second cooldown to prevent boot loop 
 
 // Global-level dedup keyed by actual track number (0..31)
 const lastGlobalTrack = new Map(); // key: globalIndex → { name, ts }
-const GLOBAL_TRACK_DEDUP_MS = 2000;
+const GLOBAL_TRACK_DEDUP_MS = 4000;
 function shouldForwardGlobal(globalIndex, nameEscaped) {
   try {
     const rec = lastGlobalTrack.get(globalIndex);
@@ -75,7 +75,7 @@ let udpPort = null;
 // - Burst-level: also suppress identical repeats within a short window
 const lastTracknameValue = new Map(); // key: `${deviceId}:${localIndex}` → lastEscapedName
 const lastTracknameTime = new Map();  // key: `${deviceId}:${localIndex}:${name}` → timestamp
-const TRACKNAME_DEDUP_MS = 2000;
+const TRACKNAME_DEDUP_MS = 4000;
 function shouldSendTrackname(deviceId, localIndex, nameEscaped) {
   try {
     const keySlot = `${deviceId}:${localIndex}`;
@@ -149,6 +149,8 @@ let abletonGreetingSent = false; // Flag to ensure one-time message
 let lastHiTime = 0;
 let lastHelloResponse = 0;
 let reannounceTimer = null; // debounce timer for /reannounce after device connects
+let expectedDeviceCount = 0; // target count from last scan
+let batchReannounceDone = false; // ensure single /reannounce per scan batch
 
 // Send OSC message to Ableton (M4L)
 function sendOSC(address, args = []) {
@@ -293,8 +295,13 @@ function initOSCListener() {
                     // Handle both 2-arg (index, name) and 3-arg (index, name, actualTrack) messages
                     const actualTrack = oscMsg.args.length >= 3 ? oscMsg.args[2].value : displayIndex;
 
-                    const esc = String(nameRaw).replace(/"/g, '\\"');
-                    const escNorm = normalizeName(nameRaw);
+                    // Sanitize name: strip outer quotes if present (M4L may include them), then escape inner quotes
+                    let nameStr = String(nameRaw).trim();
+                    if (nameStr.length >= 2 && nameStr.startsWith('"') && nameStr.endsWith('"')) {
+                      nameStr = nameStr.slice(1, -1);
+                    }
+                    const esc = nameStr.replace(/"/g, '\\"');
+                    const escNorm = normalizeName(nameStr);
                     const globalIndex = Number.isFinite(actualTrack) ? Number(actualTrack) : Number(displayIndex);
                     if (!shouldForwardGlobal(globalIndex, escNorm)) {
                       console.log(`⏭️  Deduped global /trackname for track ${globalIndex}`);
@@ -309,8 +316,9 @@ function initOSCListener() {
                     if (targetDevice) {
                         if (shouldSendTrackname(deviceId, localIndex, escNorm)) {
                           const cmd = `/trackname ${localIndex} "${esc}" ${actualTrack}\n`;
-                          sendToDevice(deviceId, cmd);
-                          console.log(`📍 Routed track ${actualTrack} to Device ${deviceId} (local index ${localIndex})`);
+                          const delay = Math.max(0, (Number.isFinite(localIndex) ? localIndex : 0) * 100);
+                          setTimeout(() => sendToDevice(deviceId, cmd), delay);
+                          console.log(`📍 Routed track ${actualTrack} to Device ${deviceId} (local index ${localIndex}, delay ${delay}ms)`);
                         } else {
                           console.log(`⏭️  Deduped /trackname for Device ${deviceId} idx ${localIndex}`);
                         }
@@ -319,7 +327,8 @@ function initOSCListener() {
                         const fallbackId = devices[0].id;
                         if (shouldSendTrackname(fallbackId, displayIndex, escNorm)) {
                           const cmd = `/trackname ${displayIndex} "${esc}" ${actualTrack}\n`;
-                          sendToDevice(fallbackId, cmd);
+                          const delay = Math.max(0, (Number.isFinite(displayIndex) ? displayIndex : 0) * 100);
+                          setTimeout(() => sendToDevice(fallbackId, cmd), delay);
                         } else {
                           console.log(`⏭️  Deduped /trackname for fallback Device ${fallbackId} idx ${displayIndex}`);
                         }
@@ -328,7 +337,8 @@ function initOSCListener() {
                         if (serial && serial.isOpen) {
                             if (shouldSendTrackname(0, displayIndex, escNorm)) {
                               const cmd = `/trackname ${displayIndex} "${esc}" ${actualTrack}\n`;
-                              send(cmd);
+                              const delay = Math.max(0, (Number.isFinite(displayIndex) ? displayIndex : 0) * 100);
+                              setTimeout(() => send(cmd), delay);
                             } else {
                               console.log(`⏭️  Deduped /trackname for legacy serial idx ${displayIndex}`);
                             }
@@ -636,12 +646,31 @@ function sendToAll(s) {
 }
 
 // Debounce sending /reannounce so we issue it once after a burst of device connections
-function scheduleReannounce(delay = 1200) {
+function scheduleReannounce(delay = 4000) {
   try {
     if (reannounceTimer) clearTimeout(reannounceTimer);
     reannounceTimer = setTimeout(() => {
       try { requestReannounce(); } catch (e) {}
     }, delay);
+  } catch {}
+}
+
+function maybeReannounceBatch() {
+  try {
+    const connectedCount = devices.length;
+    if (batchReannounceDone) return;
+    // If we met or exceeded the expected count for this scan, announce immediately
+    if (expectedDeviceCount > 0 && connectedCount >= expectedDeviceCount) {
+      batchReannounceDone = true;
+      requestReannounce();
+      return;
+    }
+    // Fallback: on smaller setups or when some ports are cooling down, announce once
+    // as soon as at least one device is connected. Use debounce to avoid duplicates.
+    if (connectedCount >= 1) {
+      batchReannounceDone = true;
+      scheduleReannounce(3000);
+    }
   } catch {}
 }
 
@@ -974,8 +1003,8 @@ app.post('/api/connect', async (req, res) => {
     
     wsBroadcast({ type: 'serial-open', path: desired, baud: BAUD });
     res.json({ ok: true, path: desired, baud: BAUD, deviceId });
-    // Request track names shortly after a manual connection
-    scheduleReannounce(600);
+    // Check batch completion after manual connect
+    maybeReannounceBatch();
     
     // Wait 3 seconds for device boot before sending init commands
     setTimeout(() => {
@@ -1221,7 +1250,13 @@ app.post('/api/trackname', (req, res) => {
     if (index >= 0 && index < 8) currentTrackNames[index] = String(name);
 
     // Build safe, quoted name and always include actualTrack (device adds +1, so default to index)
-    const esc = String(name).replace(/"/g, '\\"');
+    let nameStr = String(name);
+    nameStr = nameStr.trim();
+    // If the entire name is wrapped in quotes, strip the outer quotes to avoid double-quoting on serial
+    if (nameStr.length >= 2 && nameStr.startsWith('"') && nameStr.endsWith('"')) {
+      nameStr = nameStr.slice(1, -1);
+    }
+    const esc = nameStr.replace(/"/g, '\\"');
     const escNorm = normalizeName(name);
     const at = (actualTrack !== undefined) ? actualTrack : Number(index);
     const cmd = `/trackname ${index} "${esc}" ${at}\n`;
@@ -1746,6 +1781,9 @@ async function autoConnectDevices() {
     }
     
     console.log(`🔍 Found ${tds8Ports.length} potential TDS-8 device(s)`);
+    // For this scan, expect this many devices; we'll fire one /reannounce when all are connected
+    expectedDeviceCount = Math.min(tds8Ports.length, MAX_DEVICES);
+    batchReannounceDone = false;
     
     for (const port of tds8Ports) {
       // Check if already connected
@@ -1825,12 +1863,14 @@ async function autoConnectDevices() {
           recentlyClosed.set(port.path, Date.now());
           connectingPorts.delete(port.path);
           wsBroadcast({ type: 'device-disconnected', deviceId, path: port.path });
+          // Allow a new batch reannounce next time
+          batchReannounceDone = false;
         });
         
         console.log(`✅ Auto-connected: ${port.path} → Device ${deviceId + 1} (Tracks ${deviceId * 8 + 1}-${(deviceId + 1) * 8})`);
         wsBroadcast({ type: 'device-connected', deviceId, path: port.path, trackRange: `${deviceId * 8 + 1}-${(deviceId + 1) * 8}` });
-        // Request track names shortly after connections settle
-        scheduleReannounce(600);
+        // Check if we have reached expected device count and announce once
+        maybeReannounceBatch();
         
         // Wait 3 seconds for device boot before sending init commands
         setTimeout(() => {
