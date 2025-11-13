@@ -137,7 +137,7 @@ select.input{cursor:pointer}
           <div class="hdr" style="display:flex;align-items:center">
             <h1 style="margin:0">Serial Monitor</h1>
             <div style="display:flex;align-items:center;gap:10px;margin-left:auto">
-              <span style="font-size:11px;color:#fff;opacity:0.9">v110925-04</span>
+              <span style="font-size:11px;color:#fff;opacity:0.9">v110925-05</span>
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
                 <input type="checkbox" id="autoScroll" checked style="cursor:pointer"/>
                 Auto-scroll
@@ -896,8 +896,7 @@ async function refreshFromAbleton() {
 // ---- WebSocket: stream logs and state from Bridge ----
 function initWebSocket() {
   try {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${proto}://${location.host}`);
+    const ws = new WebSocket(`ws://127.0.0.1:8088`);
     ws.onopen = () => { log('✓ WebSocket connected to Bridge', 'info'); };
     ws.onclose = () => { log('✗ WebSocket disconnected from Bridge', 'err'); };
     ws.onerror = () => { log('✗ WebSocket error', 'err'); };
@@ -1292,7 +1291,7 @@ async function flashFirmware() {
 
 // ----- WebSocket -----
 (() => {
-  const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
+  const ws = new WebSocket('ws://127.0.0.1:8088');
   ws.onmessage = ev => {
     const msg = JSON.parse(ev.data);
     if (msg.type === 'serial-data') {

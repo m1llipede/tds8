@@ -328,6 +328,9 @@ function initOSCListener() {
                     const nameRaw = oscMsg.args[1].value;
                     // Handle both 2-arg (index, name) and 3-arg (index, name, actualTrack) messages
                     const actualTrack = oscMsg.args.length >= 3 ? oscMsg.args[2].value : displayIndex;
+                    if (!Number.isFinite(actualTrack) || actualTrack < 0 || actualTrack >= 32) {
+                      return;
+                    }
 
                     // Sanitize name: strip outer quotes if present (M4L may include them), then escape inner quotes
                     let nameStr = String(nameRaw).trim();
@@ -388,6 +391,9 @@ function initOSCListener() {
                 }
                 else if (oscMsg.address === "/activetrack" && oscMsg.args.length >= 1) {
                     const index = oscMsg.args[0].value;
+                    if (!Number.isFinite(index) || index < 0 || index >= 32) {
+                      return;
+                    }
                     const deviceId = Math.floor(index / 8);
                     const localIndex = index % 8;
                     if (devices && devices.length > 0) {
@@ -470,7 +476,12 @@ console.log('========================================\n');
 
 app.use(express.json({ limit: '10mb' }));
 app.use(morgan('dev'));
-app.use(express.static(path.join(__dirname, 'web')));
+const WEB_DIR = path.join(__dirname, 'web');
+app.use(express.static(WEB_DIR));
+// Serve index explicitly to ensure correct content-type and reliable root handling
+app.get('/', (req, res) => {
+  res.sendFile(path.join(WEB_DIR, 'index.html'));
+});
 
 app.post('/api/firmware/flash', async (req, res) => {
   const { devicePath, firmwareUrl } = req.body;
@@ -1955,4 +1966,15 @@ server.listen(PORT, () => {
       console.error('Auto-connect interval failed:', e.message);
     }
   }, 10000);
+});
+
+// SPA fallback: for any non-API route, serve the UI index so deep links work
+// Place after other routes so API endpoints are not overridden
+app.use((req, res, next) => {
+  try {
+    if (!req.path.startsWith('/api/')) {
+      return res.sendFile(path.join(WEB_DIR, 'index.html'));
+    }
+  } catch {}
+  next();
 });
