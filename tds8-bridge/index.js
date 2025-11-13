@@ -67,6 +67,40 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
+ // --- CORS allowlist for remote UI (e.g., GitHub Pages / Netlify) ---
+ // Configure ALLOWED_ORIGINS as a comma-separated list, e.g.:
+ //   ALLOWED_ORIGINS=https://m1llipede.github.io,https://your-site.netlify.app
+ const DEFAULT_ALLOWED = [
+  'http://127.0.0.1:8088',
+  'http://localhost:8088',
+  'https://m1llipede.github.io',
+  'null' // file:// or some browsers may send "null" origin for local files
+ ];
+ const ALLOWED = (process.env.ALLOWED_ORIGINS || '')
+   .split(',')
+   .map(s => s.trim())
+   .filter(Boolean);
+ const ALLOWLIST = new Set([...DEFAULT_ALLOWED, ...ALLOWED]);
+
+ function corsMiddleware(req, res, next) {
+   try {
+     const origin = req.headers.origin || '';
+     if (origin && ALLOWLIST.has(origin)) {
+       res.setHeader('Access-Control-Allow-Origin', origin);
+       res.setHeader('Vary', 'Origin');
+       res.setHeader('Access-Control-Allow-Credentials', 'true');
+       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+     }
+     if (req.method === 'OPTIONS') {
+       res.statusCode = 204; // No Content
+       return res.end();
+     }
+   } catch {}
+   next();
+ }
+ app.use(corsMiddleware);
+
 // OSC UDP Port for broadcasting to Ableton M4L (lazy init)
 let udpPort = null;
 

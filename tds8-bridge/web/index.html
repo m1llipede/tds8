@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>TDS-8 Control</title>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
 <style>
 :root{--brand:#ff8800;--brand2:#8a2be2;--text:#222;--muted:#666;--card:#fff;--bg:#f6f7fb;--hover:#f0f1f5}
 *{box-sizing:border-box}
@@ -91,8 +91,8 @@ select.input{cursor:pointer}
         <!-- Devices -->
         <div class="card">
           <div class="hdr" style="position:relative;padding:8px 16px;">
-            <img src="/logos/Playoptix%20Logo-black-transparent.png" alt="Playoptix" style="position:absolute;left:12px;top:10px;height:24px;opacity:0.95"/>
-            <img src="/logos/TDS-8%20Logo-white-transparent.png" alt="TDS-8" style="height:164px;display:block;margin:0 auto"/>
+            <img src="logos/Playoptix%20Logo-black-transparent.png" alt="Playoptix" style="position:absolute;left:12px;top:10px;height:24px;opacity:0.95"/>
+            <img src="logos/TDS-8%20Logo-white-transparent.png" alt="TDS-8" style="height:164px;display:block;margin:0 auto"/>
           </div>
           <div class="body">
             <div id="deviceList" class="device-list">
@@ -137,7 +137,7 @@ select.input{cursor:pointer}
           <div class="hdr" style="display:flex;align-items:center">
             <h1 style="margin:0">Serial Monitor</h1>
             <div style="display:flex;align-items:center;gap:10px;margin-left:auto">
-              <span style="font-size:11px;color:#fff;opacity:0.9">v110925-03</span>
+              <span style="font-size:11px;color:#fff;opacity:0.9">v110925-04</span>
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
                 <input type="checkbox" id="autoScroll" checked style="cursor:pointer"/>
                 Auto-scroll
@@ -230,6 +230,44 @@ select.input{cursor:pointer}
 
 
 <script>
+const API_BASE = 'http://127.0.0.1:8088';
+const _origFetch = window.fetch.bind(window);
+window.fetch = (input, init) => {
+  try {
+    let url = typeof input === 'string' ? input : (input && input.url ? input.url : String(input));
+    if (url.startsWith('/')) url = API_BASE + url;
+    else if (!/^https?:\/\//i.test(url) && !url.startsWith('ws') && !url.startsWith('data:')) url = API_BASE + '/' + url.replace(/^\/?/, '');
+    return _origFetch(url, init);
+  } catch { return _origFetch(input, init); }
+};
+
+async function healthCheck() {
+  const banner = document.getElementById('connectionBanner');
+  try {
+    const res = await _origFetch(API_BASE + '/', { cache: 'no-store', mode: 'cors' });
+    if (res.ok) {
+      if (banner) { banner.style.display = 'none'; banner.textContent = ''; }
+      return true;
+    }
+    throw new Error('HTTP ' + res.status);
+  } catch (e) {
+    if (banner) {
+      banner.style.display = 'block';
+      banner.style.padding = '10px 12px';
+      banner.style.border = '2px solid #b91c1c';
+      banner.style.borderRadius = '8px';
+      banner.style.background = '#fee2e2';
+      banner.style.color = '#7f1d1d';
+      banner.style.margin = '10px 0';
+      banner.style.fontSize = '12px';
+      banner.innerHTML = '⚠️ TDS-8 Bridge not detected on this computer. Please start the TDS-8 Bridge app, then refresh.';
+    }
+    return false;
+  }
+}
+
+setTimeout(() => { healthCheck(); }, 300);
+setInterval(() => { healthCheck(); }, 5000);
 const $ = s => document.querySelector(s);
 const logEl = $('#log');
 let autoScrollEnabled = true;
