@@ -39,8 +39,8 @@ function createWindow() {
     height: 1000,
     minWidth: 1200,
     minHeight: 900,
-    title: 'TDS-8 Control',
-    icon: path.join(__dirname, 'web', 'icon.png'),
+    title: 'TDS-8 Bridge',
+    icon: path.join(__dirname, 'assets', 'icon-white.png'),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -107,7 +107,7 @@ function createWindow() {
 // Create system tray
 function createTray() {
   // Use a simple icon (you can replace with custom icon)
-  const iconPath = path.join(__dirname, 'web', 'tray-icon.png');
+  const iconPath = path.join(__dirname, 'assets', 'icon-white.png');
   
   tray = new Tray(iconPath);
   
@@ -140,7 +140,7 @@ function createTray() {
     }
   ]);
 
-  tray.setToolTip('TDS-8 Control');
+  tray.setToolTip('TDS-8 Bridge');
   tray.setContextMenu(contextMenu);
 
   // Double-click to show window
