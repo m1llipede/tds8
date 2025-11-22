@@ -1,0 +1,1903 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>TDS-8 Control</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<style>
+:root{--brand:#ff8800;--brand2:#8a2be2;--text:#222;--muted:#666;--card:#fff;--bg:#f6f7fb;--hover:#f0f1f5}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);font:14px/1.3 system-ui,Segoe UI,Roboto;color:var(--text);overflow:auto}
+.wrap{max-width:100%;min-height:100vh;display:flex;flex-direction:column;padding:12px}
+.main-grid{display:grid;grid-template-columns:1fr 380px;gap:12px;flex:1;min-height:0}
+.left-col{display:flex;flex-direction:column;gap:12px;overflow-y:auto}
+.right-col{display:flex;flex-direction:column;min-height:0}
+.card{background:var(--card);border-radius:10px;box-shadow:0 4px 12px rgba(0,0,0,.06);overflow:hidden}
+.card.flex{display:flex;flex-direction:column;flex:1;min-height:0}
+.hdr{background:linear-gradient(135deg,var(--brand),var(--brand2));padding:12px 16px;color:#fff}
+.hdr h1{margin:0;font-size:16px;font-weight:600}
+.body{padding:16px}
+.body.flex{flex:1;min-height:0;display:flex;flex-direction:column}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid3{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+label{display:block;color:var(--text);font-size:13px;font-weight:500;margin-bottom:6px}
+.input{padding:8px 10px;border:2px solid #e3e6ef;border-radius:8px;background:#fff;width:100%;font-size:13px;transition:all .2s}
+.input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 2px rgba(255,136,0,.1)}
+select.input{cursor:pointer}
+.btn{appearance:none;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;font-weight:500;transition:all .2s;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.btn:hover{transform:translateY(-1px);box-shadow:0 3px 8px rgba(0,0,0,.12)}
+.btn:active{transform:translateY(0)}
+.btn.primary{background:var(--brand);color:#fff}
+.btn.primary:hover{background:#ff9920}
+.btn.secondary{background:var(--brand2);color:#fff}
+.btn.secondary:hover{background:#9b3bf3}
+.btn.ghost{background:#fff;border:2px solid #e3e6ef;color:var(--text)}
+.btn.ghost:hover{background:var(--hover);border-color:#d0d3df}
+.btn.ghost.active{background:var(--brand);color:#fff;border-color:var(--brand)}
+.btn.sm{padding:6px 10px;font-size:12px}
+.btn-group{display:flex;gap:8px;flex-wrap:wrap}
+.device-list{display:flex;flex-direction:column;gap:6px}
+.device-item{background:#f3f4f6;border:2px solid #d1d5db;border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;transition:all .2s;opacity:0.6}
+.device-item:hover{border-color:var(--brand);background:#fff;opacity:1}
+.device-item.connected{border-color:var(--brand);background:#fff8f0;opacity:1}
+.device-name{font-weight:600;font-size:14px;color:var(--text)}
+.device-status{font-size:11px;color:#10b981;margin-top:2px}
+.trackgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:4px;max-height:650px;overflow-y:scroll;padding-right:8px}
+.trackrow{display:flex;gap:6px;align-items:center}
+.trackrow label{margin:0;min-width:60px;font-weight:600;font-size:12px;color:var(--text)}
+.trackrow .input{padding:5px 8px;font-size:12px}
+.track-sep{grid-column:1 / -1;height:6px;border-radius:6px;margin:6px 0;background:linear-gradient(90deg,#ff8800 0%, #8a2be2 100%);opacity:0.3}
+.serial-card{max-height:calc(100vh - 140px);display:flex;flex-direction:column}
+.serial-card .body.flex{flex:1;min-height:0;display:flex;flex-direction:column}
+.icon-card{text-align:center;padding:20px 16px;cursor:pointer;transition:all .2s;border-radius:8px;border:2px solid transparent}
+.icon-card:hover{background:var(--hover);border-color:#e3e6ef;transform:translateY(-1px)}
+.icon-card .icon{font-size:36px;margin-bottom:8px}
+.icon-card h3{margin:0 0 4px;font-size:14px;font-weight:600}
+.icon-card p{margin:0;font-size:11px;color:var(--muted);line-height:1.3}
+.log{font-family:ui-monospace,Menlo,Consolas,monospace;background:#fafbff;color:var(--text);border:2px solid #e3e6ef;border-radius:8px;padding:12px;overflow-y:scroll;font-size:11px;line-height:1.5;flex:1;min-height:200px;max-height:100%}
+.log::-webkit-scrollbar{width:12px}
+.log::-webkit-scrollbar-track{background:#e3e6ef;border-radius:4px}
+.log::-webkit-scrollbar-thumb{background:#999;border-radius:4px}
+.log::-webkit-scrollbar-thumb:hover{background:#666}
+.log-line{margin:1px 0}
+.log-line.out{color:#10b981}
+.log-line.err{color:#ef4444}
+.helpbox{margin-top:10px;padding:10px 12px;border:2px solid #e3e6ef;border-radius:8px;background:#fafbff;font-size:11px;color:#444}
+.helpbox code{background:#fff;border:1px solid #e3e6ef;border-radius:4px;padding:0 4px}
+.divider{height:1px;background:#e3e6ef;margin:12px 0}
+.notice{background:#fef3c7;border:2px solid #fbbf24;border-radius:8px;padding:10px 12px;font-size:12px;color:#92400e;margin-bottom:12px}
+.network-item{display:flex;justify-content:space-between;align-items:center;padding:12px;background:#fafbff;border-bottom:1px solid #e3e6ef;transition:all .2s;cursor:pointer}
+.network-item:hover{background:#fff}
+.network-item:last-child{border-bottom:none}
+.network-item .name{font-weight:500;font-size:14px;color:var(--text)}
+.network-item .icon{font-size:20px;color:var(--muted)}
+.network-item.saved .name{color:#e91e63}
+.network-item.saved .icon{color:#e91e63}
+.footer-info{text-align:center;padding:16px;background:#fafbff;border-top:1px solid #e3e6ef;font-size:11px;color:var(--muted)}
+.footer-info .company{font-weight:600;color:var(--text);margin-bottom:4px}
+.footer-info .serial{font-family:ui-monospace,monospace}
+</style>
+</head>
+<body>
+  <div class="wrap" style="display:block;" id="mainApp">
+    <!-- Connection Status Banner (hidden; controls moved below Serial Monitor) -->
+    <div id="connectionBanner" style="display:none"></div>
+    
+    <div class="main-grid">
+      <!-- Left Column -->
+      <div class="left-col">
+        
+        <!-- Devices -->
+        <div class="card">
+          <div class="hdr" style="position:relative;padding:8px 16px;">
+            <img src="assets/Playoptix Logo-white-transparent.png" alt="Playoptix" style="position:absolute;left:12px;top:10px;height:32px;opacity:0.95"/>
+            <img src="assets/icon-white.png" alt="TDS-8" style="height:164px;display:block;margin:0 auto"/>
+          </div>
+          <div class="body">
+            <div id="deviceList" class="device-list">
+              <div style="padding:8px 12px;background:#d1ecf1;border:2px solid #0c5460;border-radius:6px;margin-bottom:8px;font-size:11px;color:#0c5460">
+                <strong>💡 Manual Connect Mode</strong><br>
+                Click <strong>Refresh</strong> to scan, then <strong>Connect</strong> on each device
+              </div>
+              <div style="text-align:center;padding:12px;color:var(--muted);font-size:12px">
+                Click Refresh to scan for devices
+              </div>
+            </div>
+            
+          </div>
+        </div>
+
+        <!-- Track Names -->
+        <div class="card">
+          <div class="hdr" style="display:flex;align-items:center;gap:10px">
+            <h1 style="margin:0">Track Names</h1>
+            <div class="btn-group" id="trackBtnGroup" style="margin-left:auto">
+              <button id="btnRefresh" class="btn primary">Refresh from Ableton</button>
+              <button id="btnSendAll" class="btn ghost sm">Update Custom Track Names</button>
+              <button id="btnResetTracks" class="btn ghost sm">Reset Custom Track Names</button>
+              <button id="btnSaveTracks" class="btn secondary sm">Save Current Track Names</button>
+              <button id="btnReadTracks" class="btn secondary sm">Load Saved Track Names</button>
+            </div>
+          </div>
+          <div class="body" style="display:flex;flex-direction:column;min-height:0;max-height:500px;overflow-y:auto;">
+            <!-- Offset Controls (hidden for now) -->
+            <div style="display:none"></div>
+            
+            <div class="trackgrid" id="tracks" style="overflow-y:auto;max-height:320px;"></div>
+            <div class="divider"></div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Right Column - Serial Monitor -->
+      <div class="right-col">
+        <div class="card flex serial-card">
+          <div class="hdr" style="display:flex;align-items:center">
+            <h1 style="margin:0">Serial Monitor</h1>
+            <div style="display:flex;align-items:center;gap:10px;margin-left:auto">
+              <button class="btn sm ghost" style="background:#fff;border:2px solid #ef4444;color:#b91c1c" onclick="quitBridge()">Quit Bridge</button>
+              <span style="font-size:11px;color:#fff;opacity:0.9">v112025-01</span>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                <input type="checkbox" id="autoScroll" checked style="cursor:pointer"/>
+                Auto-scroll
+              </label>
+            </div>
+          </div>
+          <div class="body flex">
+            <div id="log" class="log"></div>
+            <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <div class="btn-group" style="gap:6px">
+                <button id="qaRebootAll" class="btn sm ghost" title="Reboot all devices">Reboot All</button>
+                <button id="btnRefreshDevices" class="btn sm ghost" title="Scan for devices" style="background:#fff;color:#000;border:2px solid #e3e6ef">Refresh Devices</button>
+              </div>
+            </div>
+            <!-- Compact Connection Controls (moved here) -->
+            <div style="margin-top:12px">
+              <div style="font-size:12px;font-weight:600;color:#374151;text-align:center;margin-bottom:6px">TDS-8 Connection</div>
+              <div style="display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:nowrap">
+                <select id="connectionTypeSelect" class="input" style="padding:6px 10px;width:140px;display:none">
+                  <option value="wired">Wired (USB)</option>
+                  <option value="wifi">WiFi</option>
+                </select>
+                <div style="display:flex;align-items:center;gap:6px;white-space:nowrap">
+                  <div style="font-size:11px;color:#6b7280;white-space:nowrap">IP:</div>
+                  <div id="connectionIP" style="font-family:ui-monospace,monospace;font-size:12px;font-weight:600;padding:4px 8px;background:#eef2ff;border-radius:6px;border:1px solid #c7d2fe;white-space:nowrap;display:inline-block">—</div>
+                </div>
+              </div>
+            </div>
+            
+            <div class="divider"></div>
+            <!-- Firmware Update (below Serial Monitor) -->
+            <div style="margin-top:10px">
+              <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:8px">Firmware Update</div>
+              <div class="grid" style="grid-template-columns:1fr; gap:8px; align-items:stretch">
+                <div>
+                  <label for="fwUrl">Firmware Release / Asset</label>
+                  <select id="fwUrl" class="input" title="Select a firmware asset (.bin) from GitHub releases">
+                    <option value="">Loading releases…</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="fwDeviceSelect">Target Device</label>
+                  <select id="fwDeviceSelect" class="input" title="Select a connected TDS-8 device">
+                    <option value="">No devices connected</option>
+                  </select>
+                </div>
+              </div>
+              <div style="margin-top:8px; display:flex; gap:8px; justify-content:flex-end">
+                <button id="btnFlash" class="btn primary sm" onclick="flashFirmware()">Flash</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    
+      </div>
+    <!-- Connection Status Banner (hidden; controls moved below Serial Monitor) -->
+    <div id="connectionBanner" style="display:none"></div>
+    
+    
+    
+    <!-- Wi-Fi Modal (legacy - removed) -->
+
+  <!-- Add Network Modal -->
+  <div id="modalAddNetwork" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:1001;padding:20px;overflow:auto">
+    <div style="max-width:450px;margin:80px auto;background:white;border-radius:10px;overflow:hidden">
+      <div class="hdr"><h1>➕ Join WiFi Network</h1></div>
+      <div class="body">
+        <label>Network Name (SSID)</label>
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+          <select id="ssidDropdown" class="input" style="flex:1;padding:6px 8px" title="Select WiFi network or type manually">
+            <option value="">Select or type SSID…</option>
+          </select>
+          <button id="btnScanModal" class="btn ghost sm" title="Scan for networks">🔄</button>
+        </div>
+        <input id="ssidInput" class="input" placeholder="Or type network name manually" style="margin-bottom:12px;display:none" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" inputmode="text" name="tds8_ssid"/>
+        
+        <label>Password</label>
+        <input id="pwd" class="input" type="password" placeholder="Enter password" style="margin-bottom:16px" autocomplete="new-password" data-lpignore="true" name="tds8_wifi_password"/>
+        
+        <div class="btn-group">
+          <button id="btnSaveNetwork" class="btn primary">Save & Connect</button>
+          <button id="btnCancelAdd" class="btn ghost">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+<script>
+const API_BASE = 'http://127.0.0.1:8088';
+const _origFetch = window.fetch.bind(window);
+window.fetch = (input, init) => {
+  try {
+    let url = typeof input === 'string' ? input : (input && input.url ? input.url : String(input));
+    if (url.startsWith('/')) url = API_BASE + url;
+    else if (!/^https?:\/\//i.test(url) && !url.startsWith('ws') && !url.startsWith('data:')) url = API_BASE + '/' + url.replace(/^\/?/, '');
+    return _origFetch(url, init);
+  } catch { return _origFetch(input, init); }
+};
+
+async function quitBridge() {
+  try {
+    await fetch('/api/shutdown', { method: 'POST' });
+  } catch (e) {
+    console.error('Quit Bridge failed', e);
+  }
+}
+
+async function healthCheck() {
+  const banner = document.getElementById('connectionBanner');
+  try {
+    const res = await _origFetch(API_BASE + '/', { cache: 'no-store', mode: 'cors' });
+    if (res.ok) {
+      if (banner) { banner.style.display = 'none'; banner.textContent = ''; }
+      return true;
+    }
+    throw new Error('HTTP ' + res.status);
+  } catch (e) {
+    if (banner) {
+      banner.style.display = 'block';
+      banner.style.padding = '10px 12px';
+      banner.style.border = '2px solid #b91c1c';
+      banner.style.borderRadius = '8px';
+      banner.style.background = '#fee2e2';
+      banner.style.color = '#7f1d1d';
+      banner.style.margin = '10px 0';
+      banner.style.fontSize = '12px';
+      banner.innerHTML = '⚠️ TDS-8 Bridge not detected on this computer. Please start the TDS-8 Bridge app, then refresh.';
+    }
+    return false;
+  }
+}
+
+setTimeout(() => { healthCheck(); }, 300);
+setInterval(() => { healthCheck(); }, 5000);
+const $ = s => document.querySelector(s);
+const logEl = $('#log');
+let autoScrollEnabled = true;
+const autoScrollCb = $('#autoScroll');
+if (autoScrollCb) {
+  autoScrollEnabled = !!autoScrollCb.checked;
+  autoScrollCb.addEventListener('change', (e) => {
+    autoScrollEnabled = !!e.target.checked;
+    if (autoScrollEnabled && logEl) {
+      requestAnimationFrame(() => { logEl.scrollTop = logEl.scrollHeight; });
+    }
+  });
+}
+// Periodically ensure we stay pinned to bottom when enabled
+setInterval(() => {
+  if (autoScrollEnabled && logEl) {
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+}, 500);
+let connectedDevices = new Map();
+let currentDevice = null;
+let deviceCounter = 0;
+let savedWifiNetworks = [];
+let deviceSerialNumber = 'Unknown';
+let currentConnectionType = 'none'; // 'none', 'wired', 'wifi'
+let currentConnectionIP = '—';
+let deviceVersions = new Map(); // Store firmware versions by port path
+let deviceIdMap = new Map(); // Map serial numbers to device IDs for persistence
+let isM4LConnected = false;
+let firmwareReleases = []; // Cache for GitHub releases
+
+// Sanitize names for UI display: remove wrapping quotes if present
+function stripOuterQuotes(s) {
+  if (typeof s !== 'string') return s;
+  const t = s.trim();
+  if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) return t.slice(1, -1);
+  return t;
+}
+
+function updateM4LStatus(isConnected) {
+  isM4LConnected = isConnected;
+  // Update all visible device items
+  document.querySelectorAll('.m4l-status').forEach(el => {
+    el.innerHTML = isConnected
+      ? `<span style="color:#10b981;">🎵 M4L Connected</span>`
+      : `<span style="color:#ef4444;">⚠️ M4L Disconnected</span>`;
+  });
+}
+
+// Update connection status banner
+function updateConnectionBanner(type, ip) {
+  console.log(`🔄 updateConnectionBanner called: type=${type}, ip=${ip}`);
+  currentConnectionType = type;
+  currentConnectionIP = ip || '—';
+  
+  const typeSelect = $('#connectionTypeSelect');
+  const ipEl = $('#connectionIP');
+  const banner = $('#connectionBanner');
+  
+  console.log(`🔍 Elements found: typeSelect=${!!typeSelect}, ipEl=${!!ipEl}, banner=${!!banner}`);
+  
+  // Update dropdown selection
+  if (typeSelect) {
+    typeSelect.value = type || 'wired';
+  }
+  
+  // Show/hide inline WiFi controls
+  const wifiControls = document.getElementById('wifiInlineControls');
+  if (wifiControls) wifiControls.style.display = (type === 'wifi') ? 'flex' : 'none';
+
+  // Update banner styling based on type
+  if (type === 'wired') {
+    banner.style.background = 'linear-gradient(135deg,#10b981 0%,#059669 100%)';
+  } else if (type === 'wifi') {
+    banner.style.background = 'linear-gradient(135deg,#3b82f6 0%,#2563eb 100%)';
+  } else {
+    banner.style.background = 'linear-gradient(135deg,#6b7280 0%,#4b5563 100%)';
+  }
+  
+  // Update IP address
+  if (ipEl) {
+    ipEl.textContent = ip || '—';
+  }
+}
+
+// Load saved networks from localStorage
+function loadSavedNetworks() {
+  const saved = localStorage.getItem('tds8_wifi_networks');
+  if (saved) {
+    try {
+      savedWifiNetworks = JSON.parse(saved);
+    } catch (e) {
+      savedWifiNetworks = [];
+    }
+  }
+}
+
+function saveSavedNetworks() {
+  localStorage.setItem('tds8_wifi_networks', JSON.stringify(savedWifiNetworks));
+}
+
+function log(msg, type = 'info') {
+  if (!msg) return;
+  const line = document.createElement('div');
+  line.className = 'log-line ' + type;
+  line.textContent = String(msg);
+  logEl.appendChild(line);
+  if (autoScrollEnabled) {
+    logEl.scrollTop = logEl.scrollHeight;
+    requestAnimationFrame(() => { logEl.scrollTop = logEl.scrollHeight; });
+  }
+}
+
+function updateConnectionStatus(connected) {
+  const statusEl = $('#statusText');
+  if (statusEl) {
+    if (connected) {
+      statusEl.textContent = '🔌 Connected';
+      statusEl.style.color = '#10b981';
+    } else {
+      statusEl.textContent = 'Disconnected';
+      statusEl.style.color = 'var(--muted)';
+    }
+  }
+}
+
+// ----- Device Management -----
+async function scanDevices() {
+  try {
+    console.log('[scanDevices] Fetching /api/ports...');
+    const res = await fetch('/api/ports');
+    console.log(`[scanDevices] Response status: ${res.status}`);
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    const rawResponse = await res.text();
+    console.log('[scanDevices] Raw response:', rawResponse);
+    const ports = JSON.parse(rawResponse);
+    console.log('[scanDevices] Parsed ports:', ports);
+    const list = $('#deviceList');
+    list.innerHTML = '';
+    
+    if (!Array.isArray(ports) || ports.length === 0) {
+      list.innerHTML = '<div style="text-align:center;padding:12px;color:var(--muted);font-size:12px">No TDS-8 devices found. Please connect via USB.<br><small style="color:#888">Try clicking Refresh or use manual COM connect below.</small></div>';
+            return;
+    }
+  
+  ports.forEach((p, idx) => {
+    const item = document.createElement('div');
+    item.className = 'device-item';
+    const isConnected = connectedDevices.has(p.path);
+    if (isConnected) item.classList.add('connected');
+    
+    const deviceNum = idx + 1;
+    const deviceName = `TDS-8 #${deviceNum}`;
+    
+    // Show "TDS-8" with port name
+    const portName = p.path.split('/').pop(); // Get last part of path (e.g., "cu.usbmodem101")
+    const displayName = isConnected ? `TDS-8 (${portName})` : `${deviceName} (${portName})`;
+    
+    // Get firmware version and device info if available
+    const version = deviceVersions.get(p.path);
+    const versionBadge = version ? `<span style="font-size:10px;padding:2px 6px;background:#10b981;color:#fff;border-radius:4px;margin-left:8px">v${version}</span>` : '';
+    
+    // Get device ID and track range if connected
+    const deviceInfo = connectedDevices.get(p.path);
+    const deviceIdLabel = deviceInfo ? `Device ${deviceInfo.deviceId + 1}` : '';
+    const trackInfo = deviceInfo ? ` - Tracks ${deviceInfo.trackRange}` : '';
+    
+    const statusText = isConnected 
+      ? `<div class="device-status">✓ Connected via ${currentConnectionType === 'wifi' ? 'WiFi' : 'USB'} - ${deviceIdLabel}${trackInfo}</div>` 
+      : `<div style="font-size:11px;color:#6b7280;margin-top:2px">⚪ Disconnected</div>`;
+    
+    // Create device item HTML
+    const deviceIdOptions = [0, 1, 2, 3].map(id => 
+      `<option value="${id}" ${id === idx ? 'selected' : ''}>Tracks ${id * 8 + 1}-${(id + 1) * 8}</option>`
+    ).join('');
+    
+    item.innerHTML = `
+      <div style="display:flex;flex-direction:column;flex:1;gap:8px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="flex:1;">
+            <div class="device-name">${displayName}${versionBadge}</div>
+            ${statusText}
+            <div class="m4l-status" style="font-size:11px;margin-top:2px">${isM4LConnected ? '<span style="color:#10b981;">🎵 M4L Connected</span>' : '<span style="color:#ef4444;">⚠️ M4L Disconnected</span>'}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            ${!isConnected ? 
+              `<select class="input sm" style="width:140px;font-size:11px;padding:4px 6px" data-path="${p.path}">
+                ${deviceIdOptions}
+              </select>` : ''
+            }
+            ${isConnected ? 
+              `<button class="btn ghost sm" onclick="disconnect('${p.path}')">Disconnect</button>` :
+              `<button class="btn primary sm" onclick="connect('${p.path}', '${deviceName}', '${p.serialNumber || ''}')">Connect</button>`
+            }
+          </div>
+        </div>
+      </div>
+    `;
+    
+    // Add click handler for device item
+    item.onclick = (e) => {
+      if (e.target.tagName !== 'BUTTON') {
+        if (!isConnected) {
+          connect(p.path, deviceName, p.serialNumber || '');
+        }
+      }
+    };
+    
+    list.appendChild(item);
+    
+    // Device ID selector - priority: saved by serial -> connected info -> auto by list order
+    let selectedDeviceId = null;
+    if (p.serialNumber && deviceIdMap.has(p.serialNumber)) {
+      selectedDeviceId = deviceIdMap.get(p.serialNumber);
+    } else if (deviceInfo) {
+      selectedDeviceId = deviceInfo.deviceId;
+    } else {
+      // Auto-assign next available ID (0-3)
+      const usedIds = new Set(Array.from(deviceIdMap.values()));
+      let deviceId = 0;
+      while (usedIds.has(deviceId) && deviceId < 4) {
+        deviceId++;
+      }
+      if (p.serialNumber) {
+        deviceIdMap.set(p.serialNumber, deviceId);
+        log(`🆕 Auto-assigned Device ID ${deviceId} to serial ${p.serialNumber}`, 'info');
+      }
+    }
+    
+  });
+  
+  // end of scanDevices list rendering
+  buildFirmwareDeviceSelect();
+  } catch (err) {
+    log(`✗ Error scanning devices: ${err.message}`, 'err');
+    console.error('Scan error:', err);
+  }
+}
+
+async function connect(path, name, serialNum, retryCount = 0) {
+  try {
+    log(`🔌 Connecting to ${name || path}...`, 'info');
+    
+    // Check if this device has a saved ID (by serial number) or manually selected ID
+    let deviceId;
+    
+    // First check if user manually selected an ID via dropdown
+    const selector = document.querySelector(`select[data-path="${path}"]`);
+    const manualId = selector ? parseInt(selector.value) : null;
+    
+    if (manualId !== null && !isNaN(manualId)) {
+      // Use manually selected ID
+      deviceId = manualId;
+      if (serialNum) {
+        deviceIdMap.set(serialNum, deviceId);
+      }
+      log(`👆 Using manually selected Device ID ${deviceId}`, 'info');
+    } else if (serialNum && deviceIdMap.has(serialNum)) {
+      // Restore previously saved ID
+      deviceId = deviceIdMap.get(serialNum);
+      log(`📌 Restored Device ID ${deviceId} for serial ${serialNum}`, 'info');
+    } else {
+      // Auto-assign next available ID (0-3)
+      const usedIds = new Set(Array.from(deviceIdMap.values()));
+      deviceId = 0;
+      while (usedIds.has(deviceId) && deviceId < 4) {
+        deviceId++;
+      }
+      if (serialNum) {
+        deviceIdMap.set(serialNum, deviceId);
+        log(`🆕 Auto-assigned Device ID ${deviceId} to serial ${serialNum}`, 'info');
+      }
+    }
+    
+    const trackRange = `${deviceId * 8 + 1}-${(deviceId + 1) * 8}`;
+    
+    const res = await fetch('/api/connect', { 
+      method:'POST', 
+      headers:{'Content-Type':'application/json'}, 
+      body: JSON.stringify({ path, deviceId }) // Pass device ID to backend
+    });
+    const j = await res.json();
+    if (j.ok) {
+      connectedDevices.set(path, { name, path, serialNum, deviceId, trackRange });
+      currentDevice = path;
+      updateConnectionStatus(true);
+      updateConnectionBanner('wired', '127.0.0.1');
+      
+      // Backend now sends DEVICE_ID command, no need to send it here
+      
+      // Wait for version info before logging
+      setTimeout(() => {
+        const version = deviceVersions.get(path) || 'Unknown';
+        log(`✓ Connected to ${name || path} v${version} - Device ID ${deviceId} - Tracks ${trackRange}`, 'out');
+      }, 1000);
+      
+      scanDevices();
+      buildTrackGrid(); // Rebuild track grid with new device rows
+      
+          } else {
+      log(`✗ Connection failed: ${j.error || 'Unknown error'}`, 'err');
+      // Only retry once
+      if (retryCount < 1) {
+        setTimeout(() => {
+          log('🔄 Retrying connection (1/1)...', 'info');
+          connect(path, name, serialNum, retryCount + 1);
+        }, 1000);
+      } else {
+        log('✗ Connection failed after retry. Try manual COM port or click Refresh.', 'err');
+      }
+    }
+  } catch (err) {
+    log(`✗ Connection error: ${err.message}`, 'err');
+    console.error('Connect error:', err);
+  }
+}
+
+function disconnect(path) {
+  // Send disconnect request to server to release serial port
+  fetch('/api/disconnect', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ path })
+  }).catch(err => console.error('Disconnect error:', err));
+  
+  connectedDevices.delete(path);
+  if (currentDevice === path) {
+    currentDevice = null;
+        updateConnectionStatus(false);
+    updateConnectionBanner('none', '—');
+    // Reset connection UI (legacy WiFi elements removed)
+    // const wifiStatus = $('#wifiStatus');
+    // const wifiSelect = $('#wifiNetworkSelect');
+    // const wiredStatus = $('#wiredStatus');
+    // const wiredBtn = $('#btnWiredConnect');
+    // const comSelect = $('#comPortSelect');
+    // 
+    // if (wifiStatus) { wifiStatus.textContent = 'Disconnected'; wifiStatus.style.background = '#e5e7eb'; wifiStatus.style.color = '#6b7280'; }
+    // if (wifiSelect) wifiSelect.style.backgroundColor = '';
+    // if (wiredStatus) { wiredStatus.textContent = 'Disconnected'; wiredStatus.style.background = '#e5e7eb'; wiredStatus.style.color = '#6b7280'; }
+    // if (wiredBtn) { wiredBtn.textContent = 'Connect'; wiredBtn.className = 'btn primary sm'; }
+    // if (comSelect) comSelect.style.backgroundColor = '';
+  }
+  log(`✓ Disconnected from device - Serial port released for Arduino IDE`, 'info');
+  scanDevices();
+  buildFirmwareDeviceSelect();
+}
+
+// ----- Track Names -----
+let currentOffset = 0;
+
+function updateOffsetUI() {
+  const start = currentOffset + 1;
+  const end = currentOffset + 8;
+  const offDisplay = $('#offsetDisplay');
+  const offRange = $('#offsetRange');
+  if (offDisplay) offDisplay.textContent = String(currentOffset);
+  if (offRange) offRange.textContent = `${start}-${end}`;
+}
+
+function buildTrackGrid() {
+  const host = $('#tracks');
+  host.innerHTML = '';
+  // Show 8 fields per connected device, default to 8 if none connected
+  let numDevices = connectedDevices && connectedDevices.size > 0 ? connectedDevices.size : 1;
+  let totalTracks = Math.min(numDevices * 8, 32);
+  for (let globalIdx = 0; globalIdx < totalTracks; globalIdx++) {
+    // Insert visual separators between groups of 8 (1-8 | 9-16 | 17-24 | 25-32)
+    if (globalIdx > 0 && globalIdx % 8 === 0) {
+      const sep = document.createElement('div');
+      sep.className = 'track-sep';
+      host.appendChild(sep);
+    }
+    const row = document.createElement('div');
+    row.className = 'trackrow';
+    const label = document.createElement('label');
+    label.textContent = `Track ${globalIdx + 1}`;
+    const input = document.createElement('input');
+    input.className = 'input';
+    input.id = 'tname' + globalIdx;
+    input.name = `track-${globalIdx}`;
+    input.value = String(globalIdx + 1);
+    input.placeholder = `${globalIdx + 1}`;
+    input.oninput = () => saveLocalTrackNames();
+    row.appendChild(label);
+    row.appendChild(input);
+    host.appendChild(row);
+  }
+}
+
+// ----- Local persistence for Track Names -----
+function saveLocalTrackNames() {
+  const names = [];
+  // Save up to 32 tracks
+  for (let i = 0; i < 32; i++) {
+    const el = document.getElementById('tname' + i);
+    names.push(el ? el.value : '');
+  }
+  try { localStorage.setItem('tds8_tracknames', JSON.stringify(names)); } catch {}
+}
+
+function loadLocalTrackNames() {
+  try {
+    const raw = localStorage.getItem('tds8_tracknames');
+    if (!raw) return false;
+    const names = JSON.parse(raw);
+    if (!Array.isArray(names)) return false;
+    
+    // Check if localStorage contains placeholder text or just numbers and clear it
+    const hasPlaceholders = names.some(name => {
+      if (!name) return false;
+      // Match "Track 1", "Track 2", etc. OR just numbers "1", "2", "9", "10", etc.
+      return /^Track \d+$/i.test(name) || /^\d+$/.test(name);
+    });
+    if (hasPlaceholders) {
+      console.log('⚠️ Clearing localStorage with placeholder/number text');
+      localStorage.removeItem('tds8_tracknames');
+      return false;
+    }
+    
+    // Load up to 32 tracks (or however many are in storage)
+    for (let i = 0; i < Math.min(32, names.length); i++) {
+      const el = document.getElementById('tname' + i);
+      if (el && names[i]) {  // Only set if there's a non-empty value
+        el.value = stripOuterQuotes(names[i]);
+      }
+    }
+    log('✓ Loaded track names from localStorage', 'info');
+    return true;
+  } catch { return false; }
+}
+
+function resetTracks() {
+  const numDevices = Math.max(1, connectedDevices.size);
+  const totalTracks = Math.min(numDevices * 8, 32);
+  
+  // Clear all track inputs
+  for (let i = 0; i < totalTracks; i++) {
+    const inputElement = document.getElementById('tname' + i);
+    if (inputElement) {
+      inputElement.value = String(i + 1);  // Set to numeric default
+    }
+  }
+  
+  // Clear localStorage
+  try { localStorage.removeItem('tds8_tracknames'); } catch {}
+  
+  log(`✓ Cleared all track names`, 'info');
+};
+
+async function saveTracksToBridge() {
+  log('💾 Saving track names to bridge...', 'info');
+  const names = [];
+  for (let i = 0; i < 32; i++) {
+    const el = document.getElementById('tname' + i);
+    names.push(el ? el.value : '');
+  }
+
+  try {
+    const res = await fetch('/api/tracknames', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ names })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      log('✓ Track names saved to bridge successfully', 'out');
+    } else {
+      log(`✗ Failed to save track names: ${data.error || 'Unknown error'}`, 'err');
+    }
+  } catch (err) {
+    log(`✗ Error saving track names: ${err.message}`, 'err');
+  }
+}
+
+function updateConnectionStatus(connected) {
+  const statusEl = $('#statusText');
+  if (statusEl) {
+    if (connected) {
+      statusEl.textContent = '🔌 Connected';
+      statusEl.style.color = '#10b981';
+    } else {
+      statusEl.textContent = 'Disconnected';
+      statusEl.style.color = 'var(--muted)';
+    }
+  }
+}
+
+// ----- Firmware ----- 
+async function fetchFirmwareReleases() {
+  try {
+    log('⬇️ Fetching firmware releases from GitHub...', 'info');
+    const res = await fetch('/api/firmware/releases');
+    if (!res.ok) {
+      throw new Error(`Failed to fetch releases: ${res.statusText}`);
+    }
+    const releases = await res.json();
+    
+    // Filter for releases that have .bin assets and store them
+    firmwareReleases = releases
+      .map(release => ({
+        name: release.name,
+        tag_name: release.tag_name,
+        assets: release.assets.filter(asset => asset.name.endsWith('.bin'))
+      }))
+      .filter(release => release.assets.length > 0);
+
+    log(`✅ Found ${firmwareReleases.length} firmware releases with .bin files.`, 'info');
+    
+    // After fetching, update any visible dropdowns
+    // Removed updateAllFirmwareDropdowns();
+
+  } catch (err) {
+    log(`✗ Error fetching firmware: ${err.message}`, 'err');
+    console.error('Firmware fetch error:', err);
+  }
+}
+
+// Removed updateAllFirmwareDropdowns();
+
+async function fetchFirmwareReleases() {
+  const select = document.getElementById('fwUrl');
+  try {
+    const res = await fetch('/api/firmware/releases');
+    const data = await res.json();
+    if (data.ok && data.releases) {
+      select.innerHTML = '<option value="">Select a firmware version...</option>';
+      data.releases.forEach(release => {
+        release.assets.forEach(asset => {
+          const option = document.createElement('option');
+          option.value = asset.browser_download_url;
+          option.textContent = `${release.name} - ${asset.name}`;
+          select.appendChild(option);
+        });
+      });
+    } else {
+      throw new Error(data.error || 'No releases found');
+    }
+  } catch (err) {
+    select.innerHTML = `<option value="">Error: ${err.message}</option>`;
+    log(`✗ Could not load firmware releases: ${err.message}`, 'err');
+  }
+}
+
+function buildFirmwareDeviceSelect() {
+  const sel = document.getElementById('fwDeviceSelect');
+  if (!sel) return;
+  const currentVal = sel.value;
+  sel.innerHTML = '';
+  if (connectedDevices.size === 0) {
+    sel.innerHTML = '<option value="">No devices connected</option>';
+    return;
+  }
+  connectedDevices.forEach((device, path) => {
+    const option = document.createElement('option');
+    option.value = path;
+    option.textContent = `${device.name || `Device ${device.deviceId + 1}`} (${path})`;
+    sel.appendChild(option);
+  });
+  sel.value = currentVal;
+}
+
+// Load saved networks from localStorage
+function loadSavedNetworks() {
+  const saved = localStorage.getItem('tds8_wifi_networks');
+  if (saved) {
+    try {
+      savedWifiNetworks = JSON.parse(saved);
+    } catch (e) {
+      savedWifiNetworks = [];
+    }
+  }
+}
+
+function saveSavedNetworks() {
+  localStorage.setItem('tds8_wifi_networks', JSON.stringify(savedWifiNetworks));
+}
+
+async function fetchTrackNames() {
+  try {
+    const res = await fetch('/api/tracknames');
+    const data = await res.json();
+    if (data.ok && Array.isArray(data.names)) {
+      for (let i = 0; i < data.names.length; i++) {
+        const el = document.getElementById('tname' + i);
+        if (el && data.names[i]) {
+          el.value = stripOuterQuotes(data.names[i]);
+        }
+      }
+      log('✓ Loaded track names from bridge', 'info');
+    } else {
+      log('✗ Failed to load track names from bridge', 'err');
+    }
+  } catch (err) {
+    log(`✗ Error fetching track names: ${err.message}`, 'err');
+  }
+}
+
+async function refreshFromAbleton() {
+  if (!currentDevice) {
+    log('✗ Please connect to TDS-8 device first', 'err');
+    log('Click "Connect" button on a device in the TDS-8 Devices section above', 'info');
+    return;
+  }
+  log(`🔄 Requesting track refresh from Ableton...`, 'info');
+  try {
+    const res = await fetch('/api/osc-send', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        address: '/reannounce',
+        args: []
+      })
+    });
+    if (res.ok) {
+      log(`✓ Sent OSC command: /reannounce`, 'out');
+    } else {
+      log(`✗ Failed to send /reannounce`, 'err');
+    }
+  } catch (err) {
+    log(`✗ Error: ${err.message}`, 'err');
+  }
+  setTimeout(fetchTrackNames, 400);
+}
+
+// ---- WebSocket: stream logs and state from Bridge ----
+function initWebSocket() {
+  try {
+    const ws = new WebSocket(`ws://127.0.0.1:8088`);
+    ws.onopen = () => { log('✓ WebSocket connected to Bridge', 'info'); };
+    ws.onclose = () => { log('✗ WebSocket disconnected from Bridge', 'err'); };
+    ws.onerror = () => { log('✗ WebSocket error', 'err'); };
+    ws.onmessage = (evt) => {
+      let msg;
+      try { msg = JSON.parse(evt.data); } catch { return; }
+      if (!msg || !msg.type) return;
+      switch (msg.type) {
+        case 'device-connected':
+          log(`🔌 Auto-connected: ${msg.path} → Device ${msg.deviceId + 1} (Tracks ${msg.trackRange})`, 'info');
+          connectedDevices.set(msg.path, { 
+            name: `TDS-8 #${msg.deviceId + 1}`,
+            path: msg.path, 
+            deviceId: msg.deviceId, 
+            trackRange: msg.trackRange 
+          });
+          scanDevices();
+          buildTrackGrid();
+          break;
+        case 'serial-data':
+          if (msg.data) log(String(msg.data));
+          break;
+        case 'osc-sent': {
+          const a = msg.address || '';
+          const args = Array.isArray(msg.args) ? msg.args.map(x => x.value ?? x).join(', ') : (msg.argsStr || '');
+          log(`OSC → ${a}${args ? ' [' + args + ']' : ''}`, 'out');
+          break;
+        }
+        case 'osc-received': {
+          const a = msg.address || '';
+          const args = Array.isArray(msg.args) ? msg.args.map(x => x.value ?? x).join(', ') : '';
+          if (msg.address === '/trackname' && connectedDevices.size === 0) {
+              // Silently ignore to prevent log spam on startup
+            } else {
+              log(`OSC ← ${a}${args ? ' [' + args + ']' : ''}`, 'in');
+            }
+          break;
+        }
+        case 'device-ip': {
+          const ip = msg.ip || '—';
+          const type = msg.connectionType || (ip === '127.0.0.1' ? 'wired' : 'wifi');
+          updateConnectionBanner(type, ip);
+          break;
+        }
+        case 'device-mode': {
+          const ip = msg.ip || '—';
+          const type = msg.mode || (ip === '127.0.0.1' ? 'wired' : 'wifi');
+          updateConnectionBanner(type, ip);
+          break;
+        }
+        case 'device-version': {
+          if (msg.path) {
+            deviceVersions.set(msg.path, msg.version || '');
+            scanDevices();
+          }
+          break;
+        }
+        case 'serial-open':
+        case 'serial-close':
+        case 'serial-error':
+          scanDevices();
+          break;
+        case 'ableton-connected':
+          updateM4LStatus(true);
+          log('✓ Ableton connected (heartbeat /hi)', 'out');
+          // Kick off backend auto-connect sweep so devices attach without manual clicks
+          fetch('/api/connect-all', { method: 'POST' }).catch(err => console.error('connect-all failed:', err));
+          setTimeout(async () => {
+            try {
+              const res = await fetch('/api/osc-status');
+              const data = await res.json();
+              if (data && data.ok && Array.isArray(data.deviceList)) {
+                connectedDevices.clear();
+                data.deviceList.forEach(d => {
+                  if (!d || !d.path) return;
+                  const deviceId = typeof d.id === 'number' ? d.id : 0;
+                  const trackRange = `${deviceId * 8 + 1}-${(deviceId + 1) * 8}`;
+                  connectedDevices.set(d.path, {
+                    name: `TDS-8 #${deviceId + 1}`,
+                    path: d.path,
+                    deviceId,
+                    trackRange
+                  });
+                });
+                scanDevices();
+                buildTrackGrid();
+                buildFirmwareDeviceSelect();
+              }
+            } catch (err) {
+              console.error('osc-status failed:', err);
+            }
+          }, 2000);
+          break;
+        case 'ableton-disconnected':
+          updateM4LStatus(false);
+          log('⚠️ Ableton disconnected (no /hi)', 'err');
+          break;
+      }
+    };
+  } catch (e) {
+    log(`✗ WebSocket init failed: ${e.message}`, 'err');
+  }
+}
+
+// Send track names for a specific device based on its device ID
+async function sendTrackNamesForDevice(deviceId) {
+  const startTrack = deviceId * 8;
+  const endTrack = startTrack + 8;
+  
+  let count = 0;
+  for (let i = startTrack; i < endTrack; i++) {
+    const inputElement = document.getElementById('tname' + i);
+    const name = inputElement ? inputElement.value.trim() : '';
+    
+    if (name) {
+      const localIndex = i - startTrack;
+      const payload = { index: localIndex, name, actualTrack: i };
+      console.log(`[AUTO-SEND] Track ${i} to Device ${deviceId}, local index ${localIndex}: "${name}"`);
+      await fetch('/api/trackname', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      count++;
+      await new Promise(r => setTimeout(r, 100));
+    }
+  }
+  
+  if (count > 0) {
+    log(`✓ Sent ${count} track names to Device ${deviceId} (Tracks ${startTrack + 1}-${endTrack})`, 'out');
+  }
+  await new Promise(r => setTimeout(r, 250));
+}
+
+async function sendAllTracks() {
+  console.log('[DEBUG] sendAllTracks called');
+  console.log('[DEBUG] currentDevice:', currentDevice);
+  console.log('[DEBUG] connectedDevices.size:', connectedDevices.size);
+  console.log('[DEBUG] connectedDevices:', Array.from(connectedDevices.entries()));
+  
+  // Check if any device is connected
+  if (!currentDevice && connectedDevices.size === 0) {
+    log('✗ Please connect to a TDS-8 device first', 'err');
+    log('Click "Connect" button on a device in the TDS-8 Devices section above', 'info');
+    return;
+  }
+
+  log('📤 Sending track names to connected devices...', 'info');
+  
+  const trackToDevice = new Map();
+  connectedDevices.forEach((deviceInfo, path) => {
+    console.log('[DEBUG] Processing device:', path, deviceInfo);
+    const deviceId = deviceInfo.deviceId;
+    const startTrack = deviceId * 8;
+    const endTrack = startTrack + 8;
+    console.log(`[DEBUG] Device ${deviceId}: tracks ${startTrack}-${endTrack-1}`);
+    for (let t = startTrack; t < endTrack; t++) {
+      trackToDevice.set(t, { deviceId, localIndex: t - startTrack });
+    }
+  });
+
+  // Fallback for single-device mode when map hasn't been populated yet
+  if (trackToDevice.size === 0 && currentDevice) {
+    console.log('[DEBUG] Fallback: assuming single device with Device ID 0');
+    for (let t = 0; t < 8; t++) {
+      trackToDevice.set(t, { deviceId: 0, localIndex: t });
+    }
+  }
+  
+  console.log('[DEBUG] trackToDevice map:', Array.from(trackToDevice.entries()));
+  
+  let count = 0;
+  for (let i = 0; i < 32; i++) {
+    const inputElement = document.getElementById('tname' + i);
+    const name = inputElement ? inputElement.value.trim() : '';
+    if (name) {
+      console.log(`[DEBUG] Track ${i} has name: "${name}", has mapping: ${trackToDevice.has(i)}`);
+    }
+    if (name && trackToDevice.has(i)) {
+      const { deviceId, localIndex } = trackToDevice.get(i);
+      const payload = { index: localIndex, name, actualTrack: i };
+      console.log(`[DEBUG] Sending track ${i}:`, payload);
+      try {
+        const res = await fetch('/api/trackname', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+          const error = await res.json();
+          log(`✗ Failed to send track ${i}: ${error.error || 'Unknown error'}`, 'err');
+        } else {
+          count++;
+          console.log(`[DEBUG] Successfully sent track ${i}`);
+        }
+      } catch (err) {
+        log(`✗ Error sending track ${i}: ${err.message}`, 'err');
+        console.error('[DEBUG] Error:', err);
+      }
+      await new Promise(r => setTimeout(r, 75));
+    }
+  }
+  saveLocalTrackNames();
+  if (count > 0) {
+    log(`✓ Updated ${count} track names to connected devices`, 'out');
+  } else {
+    log('⚠️ No track names were sent (fields may be empty or no devices connected)', 'info');
+  }
+}
+
+// ----- Modals -----
+
+// Shared WiFi scan function
+async function scanWiFiNetworks() {
+  log('📡 Scanning for WiFi networks...', 'info');
+  try {
+    const res = await fetch('/api/wifi-scan');
+    const data = await res.json();
+    if (data.ok && data.ssids) {
+      scannedNetworks = data.ssids;
+      displayNetworkList();
+      // Also populate top bar dropdown
+      const wifiSelect = $('#wifiNetworkSelect');
+      if (wifiSelect) {
+        wifiSelect.innerHTML = '<option value="">Select WiFi network...</option>';
+        data.ssids.forEach(ssid => {
+          const option = document.createElement('option');
+          option.value = ssid;
+          option.textContent = ssid;
+          wifiSelect.appendChild(option);
+        });
+      }
+      log(`✓ Found ${data.ssids.length} networks`, 'out');
+    } else {
+      log(`✗ Scan failed: ${data.error || 'Unknown error'}`, 'err');
+    }
+  } catch (err) {
+    log(`✗ Scan error: ${err.message}`, 'err');
+  }
+}
+
+// All WiFi and Firmware button handlers moved to DOMContentLoaded
+
+  // Old WiFi functions (replaced by modal system)
+  // function displayNetworkList() - removed
+  // function connectToNetwork() - removed
+  // function saveNetwork() - removed
+  // function scanWiFiNetworks() - removed (replaced by scanWiFiModal)
+  // let scannedNetworks = [] - no longer needed
+const MANIFEST_URL = 'https://raw.githubusercontent.com/m1llipede/tds8/main/manifest.json';
+
+async function checkFirmware() {
+  if (!currentDevice) {
+    const status = $('#firmwareStatus');
+    status.innerHTML = `
+      <div style="font-size:48px;margin-bottom:12px">⚠️</div>
+      <h3 style="margin:0 0 8px;color:var(--text);font-size:15px">No Device Connected</h3>
+      <p style="color:var(--muted);margin:0;font-size:12px">Please connect a TDS-8 device first</p>
+    `;
+    log('✗ Please connect a device before checking for updates', 'err');
+    return;
+  }
+  
+  const status = $('#firmwareStatus');
+  status.innerHTML = '<div style="font-size:48px;margin-bottom:12px">⏳</div><p style="color:var(--muted);font-size:13px">Checking for updates...</p>';
+  
+  try {
+    const url = new URL('/api/ota-check', window.location.origin);
+    url.searchParams.set('manifest', MANIFEST_URL);
+    
+    const res = await fetch(url);
+    const j = await res.json();
+    
+    if (j.ok) {
+      const deviceVer = j.deviceVersion || 'Unknown';
+      const latestVer = j.manifest.version;
+      const isNewer = j.isNewer;
+      
+      if (isNewer) {
+        status.innerHTML = `
+          <div style="font-size:48px;margin-bottom:12px">🎉</div>
+          <h3 style="margin:0 0 8px;color:var(--text);font-size:15px">Update Available!</h3>
+          <p style="color:var(--muted);margin:0;font-size:12px">Current: ${deviceVer} → New: ${latestVer}</p>
+        `;
+        $('#btnOta').style.display = 'inline-flex';
+        log(`Update available: ${latestVer}`, 'info');
+      } else {
+        status.innerHTML = `
+          <div style="font-size:48px;margin-bottom:12px">✅</div>
+          <h3 style="margin:0 0 8px;color:var(--text);font-size:15px">Up to Date</h3>
+          <p style="color:var(--muted);margin:0;font-size:12px">Version ${deviceVer}</p>
+        `;
+        $('#btnOta').style.display = 'none';
+        log(`Firmware is up to date (${deviceVer})`, 'info');
+      }
+    } else {
+      status.innerHTML = `
+        <div style="font-size:48px;margin-bottom:12px">⚠️</div>
+        <h3 style="margin:0 0 8px;color:var(--text);font-size:15px">Check Failed</h3>
+        <p style="color:var(--muted);margin:0;font-size:12px">${j.error}</p>
+      `;
+      log(`✗ Update check failed: ${j.error}`, 'err');
+    }
+  } catch (err) {
+    const errorMsg = err.message.includes('404') 
+      ? 'Firmware manifest not found. The update file may not exist yet at the GitHub repository.'
+      : 'Could not reach update server. Check your internet connection.';
+    
+    status.innerHTML = `
+      <div style="font-size:48px;margin-bottom:12px">⚠️</div>
+      <h3 style="margin:0 0 8px;color:var(--text);font-size:15px">Connection Error</h3>
+      <p style="color:var(--muted);margin:0;font-size:12px">${errorMsg}</p>
+    `;
+    log(`✗ Network error: ${err.message}`, 'err');
+  }
+};
+
+async function startOTA() {
+  if (!confirm('Start firmware update? Device will switch to Wi-Fi mode and update.')) return;
+  
+  const status = $('#firmwareStatus');
+  status.innerHTML = '<div style="font-size:48px;margin-bottom:12px">⬇️</div><p style="color:var(--muted);font-size:13px">Starting update...</p>';
+  
+  const res = await fetch('/api/ota-update', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ manifest: MANIFEST_URL })
+  });
+  
+  const j = await res.json();
+  if (j.ok) {
+    status.innerHTML = '<div style="font-size:48px;margin-bottom:12px">✅</div><p style="color:#10b981;font-size:13px">Update started! Device will reboot when complete.</p>';
+    log('✓ Firmware update started', 'out');
+  } else {
+    status.innerHTML = `<div style="font-size:48px;margin-bottom:12px">⚠️</div><p style="color:#ef4444;font-size:13px">Update failed: ${j.error}</p>`;
+    log(`✗ Update failed: ${j.error}`, 'err');
+  }
+};
+
+// ----- Commands -----
+async function sendCmd(cmd) {
+  cmd = (cmd || '').trim();
+  if (!cmd) return;
+  
+  const res = await fetch('/api/send', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ cmd })
+  });
+  
+  const j = await res.json();
+  if (j.ok) log(`→ ${cmd}`, 'out');
+  else log(`✗ Send error: ${j.error}`, 'err');
+}
+
+function sendCommand() {
+  sendCmd($('#cmd').value);
+  $('#cmd').value = '';
+}
+
+// ----- Firmware (USB flash) -----
+function buildFirmwareDeviceSelect() {
+  const sel = document.getElementById('fwDeviceSelect');
+  if (!sel) return;
+  sel.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  const any = document.createElement('option');
+  any.value = 'auto';
+  any.textContent = connectedDevices.size > 0 ? 'Auto (first connected)' : 'No devices connected';
+  frag.appendChild(any);
+  if (connectedDevices.size > 0) {
+    Array.from(connectedDevices.entries()).forEach(([path, info]) => {
+      const opt = document.createElement('option');
+      opt.value = 'id:' + info.deviceId;
+      opt.textContent = `Device ${info.deviceId + 1} • ${path}`;
+      frag.appendChild(opt);
+    });
+  }
+  sel.appendChild(frag);
+  const btn = document.getElementById('btnFlash');
+  if (btn) btn.disabled = connectedDevices.size === 0;
+}
+
+async function flashFirmware() {
+  try {
+    const urlInput = document.getElementById('fwUrl');
+    const sel = document.getElementById('fwDeviceSelect');
+    const btn = document.getElementById('btnFlash');
+    if (!urlInput || !sel) return;
+    const url = (urlInput.value || '').trim();
+    if (!url) { log('✗ Firmware URL required', 'err'); return; }
+    const body = {};
+    if (/\.json($|\?)/i.test(url)) body.manifest = url; else body.url = url;
+    if (sel.value && sel.value.startsWith('id:')) {
+      const id = parseInt(sel.value.slice(3), 10);
+      if (!Number.isNaN(id)) body.deviceId = id;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = 'Flashing…'; }
+    log('⬇️ Downloading firmware and flashing device…', 'info');
+    const res = await fetch('/api/flash', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const j = await res.json();
+    if (res.ok && j && j.ok) {
+      log('✓ Flash started/completed. Device will reboot.', 'out');
+    } else {
+      log(`✗ Flash failed: ${j && j.error ? j.error : 'Unknown error'}`, 'err');
+    }
+  } catch (e) {
+    log(`✗ Flash error: ${e.message}`, 'err');
+  } finally {
+    const btn = document.getElementById('btnFlash');
+    if (btn) { btn.disabled = false; btn.textContent = 'Flash'; }
+  }
+}
+
+
+// ----- WebSocket -----
+(() => {
+  const ws = new WebSocket('ws://127.0.0.1:8088');
+  ws.onmessage = ev => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'serial-data') {
+      const lines = msg.data.split('\n');
+      lines.forEach(line => {
+        if (line.trim()) log(line, 'info');
+      });
+    }
+    if (msg.type === 'serial-open') {
+      log(`✓ Serial port opened: ${msg.path}`, 'out');
+      scanDevices();
+      // Check device status after serial opens
+      setTimeout(() => checkDeviceStatus(), 1000);
+      // Update firmware device selector
+      setTimeout(buildFirmwareDeviceSelect, 500);
+    }
+    
+    // Handle serial port close (device disconnected) - updated for multi-device support
+    if (msg.type === 'serial-close') {
+      log(`⚠️ Serial port closed: ${msg.path}`, 'warn');
+      
+      // Handle both legacy single-device and multi-device close messages
+      if (msg.deviceId !== undefined) {
+        // Multi-device close message
+        console.log(`🔌 Multi-device ${msg.deviceId} disconnected: ${msg.path}`);
+        // Remove from connected devices map if path is provided
+        if (msg.path) {
+          connectedDevices.delete(msg.path);
+        }
+        // Update current device if this was the active one
+        if (currentDevice === msg.path) {
+          currentDevice = null;
+          updateConnectionStatus(false);
+        }
+      } else {
+        // Legacy single-device close message
+        console.log(`🔌 Legacy device disconnected: ${msg.path}`);
+        if (msg.path) {
+          connectedDevices.delete(msg.path);
+        }
+        if (currentDevice === msg.path) {
+          currentDevice = null;
+          updateConnectionStatus(false);
+        }
+      }
+      
+      // Always refresh device list and rebuild track grid
+      scanDevices();
+      buildTrackGrid();
+      buildFirmwareDeviceSelect();
+    }
+    
+    // Handle multi-device connection
+    if (msg.type === 'multi-device-connected') {
+      msg.devices.forEach(d => {
+        if (d.ok) {
+          connectedDevices.set(d.path, { deviceId: d.deviceId, tracks: `${d.deviceId * 8 + 1}-${(d.deviceId + 1) * 8}` });
+        }
+      });
+      scanDevices();
+      buildFirmwareDeviceSelect();
+    }
+    if (msg.type === 'serial-error') log(`✗ Serial error: ${msg.message}`, 'err');
+    if (msg.type === 'device-connected') {
+      // Backend auto-connected a device: reflect this in UI
+      if (msg.path && typeof msg.deviceId === 'number') {
+        connectedDevices.set(msg.path, { deviceId: msg.deviceId, trackRange: msg.trackRange || `${msg.deviceId * 8 + 1}-${(msg.deviceId + 1) * 8}` });
+        currentDevice = msg.path;
+                updateConnectionStatus(true);
+        scanDevices();
+        buildTrackGrid();
+        buildFirmwareDeviceSelect();
+      }
+    }
+    if (msg.type === 'device-version') {
+      log(`Device version: ${msg.version}`, 'info');
+      // Store version for display - use path if provided, otherwise currentDevice
+      const devicePath = msg.path || currentDevice;
+      if (devicePath) {
+        deviceVersions.set(devicePath, msg.version);
+        scanDevices(); // Refresh device list to show version
+      }
+    }
+    
+    // Handle device mode update (on startup) - legacy WiFi elements removed
+    if (msg.type === 'device-mode') {
+      updateConnectionBanner(msg.mode, msg.ip);
+      
+      // Legacy WiFi UI elements removed
+      // const wifiStatus = $('#wifiStatus');
+      // const wifiSelect = $('#wifiNetworkSelect');
+      // const wiredStatus = $('#wiredStatus');
+      // const wiredBtn = $('#btnWiredConnect');
+      // const comSelect = $('#comPortSelect');
+      // 
+      // if (msg.mode === 'wifi') {
+      //   if (wifiStatus) { wifiStatus.textContent = 'Connected'; wifiStatus.style.background = '#10b981'; wifiStatus.style.color = '#fff'; }
+      //   if (wifiSelect) wifiSelect.style.backgroundColor = '#d1fae5';
+      //   if (wiredStatus) { wiredStatus.textContent = 'Disconnected'; wiredStatus.style.background = '#e5e7eb'; wiredStatus.style.color = '#6b7280'; }
+      //   if (wiredBtn) { wiredBtn.textContent = 'Connect'; wiredBtn.className = 'btn primary sm'; }
+      //   if (comSelect) comSelect.style.backgroundColor = '';
+      // } else {
+      //   if (wiredStatus) { wiredStatus.textContent = 'Connected'; wiredStatus.style.background = '#10b981'; wiredStatus.style.color = '#fff'; }
+      //   if (comSelect) comSelect.style.backgroundColor = '#d1fae5';
+      //   if (wifiStatus) { wifiStatus.textContent = 'Disconnected'; wifiStatus.style.background = '#e5e7eb'; wifiStatus.style.color = '#6b7280'; }
+      //   if (wifiSelect) wifiSelect.style.backgroundColor = '';
+      // }
+    }
+    
+    // Handle Ableton connection status updates
+    if (msg.type === 'ableton-connected') {
+      log('✅ Ableton Live connected via OSC handshake', 'info');
+      // Update UI to show Ableton is connected
+      const abletonStatus = document.getElementById('abletonStatus');
+      if (abletonStatus) {
+        abletonStatus.textContent = 'Connected';
+        abletonStatus.style.background = '#10b981';
+        abletonStatus.style.color = '#fff';
+      }
+    }
+    if (msg.type === 'ableton-disconnected') {
+      log('⚠️ Ableton Live disconnected (no OSC handshake)', 'warn');
+      // Update UI to show Ableton is disconnected
+      const abletonStatus = document.getElementById('abletonStatus');
+      if (abletonStatus) {
+        abletonStatus.textContent = 'Disconnected';
+        abletonStatus.style.background = '#ef4444';
+        abletonStatus.style.color = '#fff';
+      }
+    }
+    
+    // Handle device IP update (WiFi connection) - legacy WiFi elements removed
+    if (msg.type === 'device-ip') {
+      console.log('📡 Received device-ip:', msg);
+      
+      // Legacy WiFi UI elements removed
+      // const wifiStatus = $('#wifiStatus');
+      // const wifiSelect = $('#wifiNetworkSelect');
+      // const wiredStatus = $('#wiredStatus');
+      // const wiredBtn = $('#btnWiredConnect');
+      // const comSelect = $('#comPortSelect');
+      // 
+      // if (msg.connectionType === 'wifi') {
+      //   log(`✅ Device connected to WiFi: ${msg.ip}${msg.ssid ? ' (' + msg.ssid + ')' : ''}`, 'out');
+      //   updateConnectionBanner('wifi', msg.ip);
+      //   if (wifiStatus) { wifiStatus.textContent = 'Connected'; wifiStatus.style.background = '#10b981'; wifiStatus.style.color = '#fff'; }
+      //   if (wifiSelect) wifiSelect.style.backgroundColor = '#d1fae5';
+      //   if (wiredStatus) { wiredStatus.textContent = 'Disconnected'; wiredStatus.style.background = '#e5e7eb'; wiredStatus.style.color = '#6b7280'; }
+      //   if (wiredBtn) { wiredBtn.textContent = 'Connect'; wiredBtn.className = 'btn primary sm'; }
+      //   if (comSelect) comSelect.style.backgroundColor = '';
+      //   updateConnectionStatus(false);
+      // } else if (msg.connectionType === 'wired') {
+      //   updateConnectionBanner('wired', msg.ip);
+      // }
+    }
+  };
+  ws.onerror = () => log('✗ WebSocket connection error', 'err');
+  ws.onclose = () => log('WebSocket disconnected', 'info');
+})();
+
+// Helper function to load stored track names
+async function loadStoredTrackNames() {
+  try {
+    const res = await fetch('/api/tracknames');
+    const j = await res.json();
+    if (j && j.ok && Array.isArray(j.names)) {
+      for (let i = 0; i < 8; i++) {
+        const input = document.getElementById('tname' + i);
+        if (input) input.value = j.names[i] || '';
+      }
+      log('✓ Loaded stored track names', 'info');
+    } else {
+      log(`✗ Failed to load track names: ${j && j.error ? j.error : 'Unknown error'}`, 'err');
+    }
+  } catch (e) {
+    log(`✗ Failed to load track names: ${e.message}`, 'err');
+  }
+}
+
+// Check device status on load - legacy WiFi elements removed
+async function checkDeviceStatus() {
+  try {
+    const res = await fetch('/api/device-status');
+    const data = await res.json();
+    if (data.ok && data.connectionType !== 'none') {
+      updateConnectionBanner(data.connectionType, data.ip);
+      log(`Device already connected: ${data.connectionType} (${data.ip})`, 'info');
+    }
+  } catch (e) {
+    console.error('Failed to check device status:', e);
+  }
+}
+
+// ----- Init -----
+window.addEventListener('DOMContentLoaded', () => {
+  fetchFirmwareReleases(); // Fetch releases as soon as the page is ready
+
+  $('#deviceList').addEventListener('click', async (e) => {
+    if (e.target.classList.contains('btn-flash')) {
+      const path = e.target.dataset.path;
+      const select = document.querySelector(`.fw-select[data-path="${path}"]`);
+      const url = select ? select.value : null;
+      const releaseName = select ? (select.options[select.selectedIndex] || {}).textContent : 'N/A';
+
+      if (!url) {
+        log('⚠️ Please select a firmware version first.', 'err');
+        alert('Please select a firmware version from the dropdown.');
+        return;
+      }
+
+      if (!confirm(`Are you sure you want to flash "${releaseName}" to device ${path}?\n\nThis process can take up to a minute and the device will reboot.`)) {
+        return;
+      }
+
+      log(`⚡ Starting firmware flash for ${path}...`, 'info');
+      log(`   Firmware: ${releaseName}`, 'info');
+      e.target.disabled = true;
+      e.target.textContent = 'Flashing...';
+
+      try {
+        const res = await fetch('/api/firmware/flash', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ path, url })
+        });
+
+        const result = await res.json();
+
+        if (result.ok) {
+          log(`✅ Firmware flash successful for ${path}! Device is rebooting.`, 'out');
+          alert('Firmware update complete! The device will now reboot.');
+        } else {
+          throw new Error(result.error || 'Unknown error during flashing.');
+        }
+      } catch (err) {
+        log(`✗ Firmware flash failed: ${err.message}`, 'err');
+        console.error('Flash error:', err);
+        alert(`Firmware update failed:\n\n${err.message}`);
+      } finally {
+        e.target.disabled = false;
+        e.target.textContent = '⚡ Update';
+        // Refresh device list to reflect potential version changes after reboot
+        setTimeout(scanDevices, 3000);
+      }
+    }
+  });
+
+  log('TDS-8 Control ready', 'info');
+  
+  buildTrackGrid();
+  loadLocalTrackNames();
+  scanDevices(); // Scan for devices on page load
+  setInterval(scanDevices, 5000);
+  checkDeviceStatus();
+  // Start WebSocket stream for serial/OSC and device IP/mode updates
+  initWebSocket();
+
+  // Attach all button event listeners safely (inside DOMContentLoaded)
+  const refreshBtn = document.getElementById('btnRefreshDevices');
+  if (refreshBtn) {
+    refreshBtn.onclick = async () => {
+      log('🔄 Manually refreshing device list...', 'info');
+      await scanDevices();
+      log('✓ Device list refreshed', 'out');
+    };
+
+  
+  }
+
+  const btnRefresh = document.getElementById('btnRefresh');
+  if (btnRefresh) btnRefresh.onclick = refreshFromAbleton;
+
+  // Connection type dropdown handler
+  const connectionTypeSelect = document.getElementById('connectionTypeSelect');
+  if (connectionTypeSelect) {
+    connectionTypeSelect.onchange = async (e) => {
+      const newMode = e.target.value;
+      log(`🔄 Switching to ${newMode} mode...`, 'info');
+      
+      if (newMode === 'wired') {
+        // Send WIRED_ONLY true to all devices and reboot
+        try {
+          const response = await fetch('/api/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cmd: 'WIRED_ONLY true' })
+          });
+          const result = await response.json();
+          if (result.ok) {
+            log('✓ Sent wired mode command', 'out');
+            // Wait a moment then reboot
+            setTimeout(async () => {
+              await fetch('/api/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cmd: 'REBOOT ALL' })
+              });
+              log('🔄 Rebooting all devices to apply wired mode', 'info');
+            }, 1000);
+          }
+        } catch (err) {
+          log(`❌ Failed to switch to wired mode: ${err.message}`, 'error');
+        }
+      } else if (newMode === 'wifi') {
+        // Show WiFi network selection dialog
+        const wifiDialog = document.getElementById('wifiDialog');
+        if (wifiDialog) {
+          wifiDialog.style.display = 'block';
+          scanWifiNetworks();
+        }
+      }
+    };
+  }
+
+  const btnSendAll = document.getElementById('btnSendAll');
+  if (btnSendAll) btnSendAll.onclick = sendAllTracks;
+
+  const btnResetTracks = document.getElementById('btnResetTracks');
+  if (btnResetTracks) {
+    btnResetTracks.textContent = 'Reset Custom Track Names';
+    btnResetTracks.onclick = resetTracks;
+  }
+
+  const btnSaveTracks = document.getElementById('btnSaveTracks');
+  if (btnSaveTracks) {
+    btnSaveTracks.onclick = saveTracksToBridge;
+  }
+
+  // WiFi buttons (legacy handlers removed)
+  // const btnScanNetworks = document.getElementById('btnScanNetworks');
+  // if (btnScanNetworks) btnScanNetworks.onclick = scanWiFiNetworks;
+
+  // const btnWifiScanQuick = document.getElementById('btnWifiScanQuick');
+  // if (btnWifiScanQuick) btnWifiScanQuick.onclick = scanWiFiNetworks;
+
+  // const btnAddNetwork = document.getElementById('btnAddNetwork');
+  // if (btnAddNetwork) btnAddNetwork.onclick = () => $('#modalAddNetwork').style.display = 'block';
+
+  // const btnCancelAdd = document.getElementById('btnCancelAdd');
+  // if (btnCancelAdd) btnCancelAdd.onclick = () => $('#modalAddNetwork').style.display = 'none';
+
+  // const btnSaveNetwork = document.getElementById('btnSaveNetwork');
+  // if (btnSaveNetwork) btnSaveNetwork.onclick = saveNetwork;
+
+  // const btnCloseWifi = document.getElementById('btnCloseWifi');
+  // if (btnCloseWifi) btnCloseWifi.onclick = () => $('#modalWifi').style.display = 'none';
+
+  // Firmware buttons
+  buildFirmwareDeviceSelect();
+  const btnFlash = document.getElementById('btnFlash');
+  if (btnFlash) btnFlash.onclick = flashFirmware;
+
+  // Command input
+  const btnSend = document.getElementById('btnSend');
+  if (btnSend) btnSend.onclick = sendCommand;
+
+  const cmdInput = document.getElementById('cmd');
+  if (cmdInput) {
+    cmdInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') sendCommand();
+    });
+  }
+
+  // Legacy WiFi scan function (removed - replaced by scanWiFiModal)
+  // async function scanWifiTop() { ... } - no longer needed
+
+  // WiFi modal scan functionality
+  async function scanWiFiModal() {
+    const dropdown = document.getElementById('ssidDropdown');
+    const scanBtn = document.getElementById('btnScanModal');
+    if (!dropdown || !scanBtn) return;
+    
+    scanBtn.disabled = true;
+    scanBtn.textContent = '⏳';
+    
+    try {
+      log('📡 Scanning for WiFi networks...', 'info');
+      const res = await fetch('/api/wifi-scan');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'scan failed');
+      
+      // Clear and refill dropdown
+      dropdown.innerHTML = '<option value=\"\">Select or type SSID…</option>';
+      if (data.ssids && Array.isArray(data.ssids)) {
+        data.ssids.forEach(ssid => {
+          if (ssid) {
+            const opt = document.createElement('option');
+            opt.value = ssid;
+            opt.textContent = ssid;
+            dropdown.appendChild(opt);
+          }
+        });
+        log(`✓ Found ${data.ssids.length} networks`, 'out');
+      } else {
+        // No networks found, add manual option
+        dropdown.innerHTML = '<option value=\"\">Type SSID manually…</option>';
+        log('⚠️ No networks found, enter manually', 'info');
+      }
+    } catch (e) {
+      log(`✖ WiFi scan failed: ${e.message}`, 'error');
+      dropdown.innerHTML = '<option value=\"\">Type SSID manually…</option>';
+    } finally {
+      scanBtn.disabled = false;
+      scanBtn.textContent = '🔄';
+    }
+  }
+
+  // Show WiFi modal when switching to WiFi
+  const typeSelect2 = document.getElementById('connectionTypeSelect');
+  if (typeSelect2) {
+    typeSelect2.addEventListener('change', (e) => {
+      if (e.target.value === 'wifi') {
+        const modal = document.getElementById('modalAddNetwork');
+        if (modal) {
+          modal.style.display = 'block';
+          loadWifiCredentials(); // Autofill saved credentials
+          // Auto-scan for networks
+          setTimeout(() => scanWiFiModal(), 200);
+        }
+      } else {
+        // Wired mode selected
+        apiSend('WIRED_ONLY true').then(() => {
+          setTimeout(() => apiSend('REBOOT ALL'), 500);
+        });
+      }
+    });
+  }
+  
+  // --- WiFi Modal Logic ---
+  function loadWifiCredentials() {
+    const savedSsid = localStorage.getItem('tds8_wifi_ssid');
+    const savedPass = localStorage.getItem('tds8_wifi_pass');
+    if (savedSsid) {
+      const ssidInput = document.getElementById('ssidInput');
+      const ssidDropdown = document.getElementById('ssidDropdown');
+      if (ssidInput) ssidInput.value = savedSsid;
+      if (ssidDropdown) {
+        // Check if the saved SSID is already in the dropdown
+        let found = false;
+        for (let i = 0; i <ssidDropdown.options.length; i++) {
+          if (ssidDropdown.options[i].value === savedSsid) {
+            ssidDropdown.selectedIndex = i;
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          // If not found, show the manual input
+          ssidDropdown.value = '';
+          ssidInput.style.display = 'block';
+          ssidInput.value = savedSsid;
+        }
+      }
+    }
+    if (savedPass) {
+      const pwdInput = document.getElementById('pwd');
+      if (pwdInput) pwdInput.value = savedPass;
+    }
+  }
+
+  // Save & Connect button handler (WiFi modal)
+  const btnSaveNetwork = document.getElementById('btnSaveNetwork');
+  if (btnSaveNetwork) btnSaveNetwork.onclick = async () => {
+    const dropdown = document.getElementById('ssidDropdown');
+    const manualInput = document.getElementById('ssidInput');
+    const pwdInput = document.getElementById('pwd');
+    
+    let ssid = '';
+    if (dropdown && dropdown.value && dropdown.value !== '') {
+      ssid = dropdown.value;
+    } else if (manualInput) {
+      ssid = manualInput.value.trim();
+    }
+    
+    const password = pwdInput ? pwdInput.value : '';
+    if (!ssid) { log('SSID is required', 'error'); return; }
+    try {
+      // Save credentials to localStorage for autofill
+      localStorage.setItem('tds8_wifi_ssid', ssid);
+      localStorage.setItem('tds8_wifi_pass', password);
+
+      log('💾 WiFi credentials saved to browser for autofill.', 'info');
+
+      // 1. Send WIFI_JOIN to all devices
+      log('📡 Sending WiFi credentials to all connected devices...', 'info');
+      const joinRes = await fetch('/api/wifi-join', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ ssid, password })
+      });
+      const joinJson = await joinRes.json();
+      if (!joinRes.ok) throw new Error(joinJson.error || 'WIFI_JOIN command failed');
+      log('✓ Credentials sent.', 'out');
+
+      // 2. Send commands to switch to WiFi and reboot
+      log('🔄 Telling all devices to switch to WiFi mode and reboot...', 'info');
+      const switchRes = await fetch('/api/wifi-switch-all', { method: 'POST' });
+      const switchJson = await switchRes.json();
+      if (!switchRes.ok) throw new Error(switchJson.error || 'WiFi switch command failed');
+      
+      log('✓ WiFi switch command sent. Devices will disconnect and reboot.', 'out');
+      log('Please wait a moment for them to reconnect over WiFi.', 'info');
+
+      // Close modal
+      const modal = document.getElementById('modalAddNetwork');
+      if (modal) modal.style.display = 'none';
+
+    } catch (err) {
+      log(`✖ WiFi setup failed: ${err.message}`, 'error');
+    }
+  };
+
+  // Quick actions
+  async function apiSend(cmd) {
+    if (!cmd) return;
+    try {
+      const res = await fetch('/api/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cmd })
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || 'Request failed');
+      log(`→ ${cmd} (ok)`, 'out');
+    } catch (err) {
+      log(`✖ ${cmd} (${err.message})`, 'error');
+    }
+  }
+
+  const qaRebootAll = document.getElementById('qaRebootAll');
+  if (qaRebootAll) qaRebootAll.onclick = () => apiSend('REBOOT ALL');
+
+  const qaVersionAll = document.getElementById('qaVersionAll');
+  if (qaVersionAll) qaVersionAll.onclick = () => apiSend('VERSION ALL');
+
+  const btnReadTracks = document.getElementById('btnReadTracks');
+  if (btnReadTracks) {
+    btnReadTracks.onclick = async () => {
+      log('📖 Reading stored track names...', 'info');
+      try {
+        const res = await fetch('/api/tracknames');
+        const data = await res.json();
+        if (data.ok && data.names) {
+          for (let i = 0; i < 8 && i < data.names.length; i++) {
+            const inputElement = document.getElementById('tname' + i);
+            if (inputElement) {
+              inputElement.value = data.names[i] || '';
+            }
+          }
+          log(`✓ Loaded ${data.names.length} track names from bridge`, 'out');
+        } else {
+          log('✗ Failed to read track names', 'err');
+        }
+      } catch (err) {
+        log(`✗ Error: ${err.message}`, 'err');
+      }
+    };
+  }
+
+  // Legacy wired connection handler (removed - functionality now in device list)
+  // const wiredConnectBtn = document.getElementById('btnWiredConnect');
+  // if (wiredConnectBtn) wiredConnectBtn.onclick = async () => { ... };
+
+  // Legacy WiFi handlers (removed)
+  // const wifiConnectBtn = document.getElementById('btnWifiConnect');
+  // if (wifiConnectBtn) wifiConnectBtn.onclick = async () => { ... };
+
+  // Auto-scan WiFi networks (legacy - removed)
+  // setTimeout(async () => { ... }, 2000); - no longer needed with modal system
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,49 @@
+CURRENT ISSUES TO FIX
+====================
+
+1. **OLED 8 showing "Track 8" on boot instead of PlayOptix logo**
+   - Startup splash shows logo correctly
+   - Something is overwriting it with track name
+   - Need to check state machine transitions
+
+2. **WiFi setup instructions appearing**
+   - These were removed last week
+   - Something brought them back
+   - Need to verify showQuickStartInstructions() isn't being called
+
+3. **Device announcing 192.168.68.100 instead of 127.0.0.1**
+   - This is device's WiFi IP, not bridge IP
+   - Shouldn't happen in wired mode
+   - Need to check if wiredOnly flag is being respected
+
+4. **Heartbeat not displaying on OLED 8**
+   - Code added to show dot when /ableton_on received
+   - /hello is being sent successfully
+   - M4L not responding with /hi yet (needs implementation)
+   - Heartbeat won't show until M4L sends /hi back
+
+5. **/hello not showing in browser Serial Monitor**
+   - This is CORRECT behavior
+   - Serial Monitor = USB only
+   - OSC messages (like /hello) show in PowerShell console only
+   - Check PowerShell to see "Sent to Ableton: /hello"
+
+WHAT HASN'T BEEN CHANGED
+========================
+- Track name parsing (still working)
+- Offset support
+- Serial communication
+- Device connection
+- Basic functionality
+
+WHAT WAS CHANGED TODAY
+======================
+- Added handshake system (/hello → /hi)
+- Added heartbeat indicator on OLED 8
+- Removed Electron, switched to browser
+- Updated version to 0.33
+
+ROOT CAUSE
+==========
+Need to upload Arduino code to device. Current issues 1-3 might be from
+old code still running on device, not the new v0.33 code.

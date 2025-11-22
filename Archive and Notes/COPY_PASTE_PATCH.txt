@@ -1,0 +1,189 @@
+COPY-PASTE M4L PATCH FOR TDS-8
+================================
+
+INSTRUCTIONS:
+1. Create new Max Audio Effect in Ableton
+2. Click Edit
+3. Delete everything in the patch
+4. In Max menu: Edit → Paste From...
+5. Paste the ENTIRE text below (from ----------max5_patcher---------- to the end)
+6. Save as "TDS-8 Auto.amxd"
+
+NOTE: If this doesn't work, use the BUILD_M4L_PATCH_STEP_BY_STEP.md guide instead.
+
+----------begin_max5_patcher----------
+3850.3oc6cs0iiiCD9Y8uBDIIIQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ
+QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ
+QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ
+QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ
+QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ
+QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ
+QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ
+QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ
+QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ
+QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ
+QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ
+QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ
+QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ
+----------end_max5_patcher----------
+
+ALTERNATIVE: MANUAL BUILD
+=========================
+
+If the above doesn't work (Max can be picky about formats), follow these steps:
+
+STEP 1: Create these objects (press N, type the text, press Enter):
+
+Row 1:
+- number (label it "Offset")
+- comment "Track Offset (0, 8, 16, 24...)"
+
+Row 2:
+- button (make it big)
+- comment "Click to Refresh"
+
+Row 3:
+- t b b
+
+Row 4:
+- message: 0
+- uzi 8 0
+
+Row 5:
+- unpack i i
+
+Row 6:
+- t i i i
+
+Row 7:
+- + (plus object)
+- message: path live_set visible_tracks $1
+
+Row 8:
+- live.path
+
+Row 9:
+- t b l
+
+Row 10:
+- message: get name
+- live.observer
+
+Row 11:
+- unpack s s
+
+Row 12:
+- pack i s i
+
+Row 13:
+- prepend /trackname
+
+Row 14:
+- udpsend 127.0.0.1 8000
+- print OSC_OUT
+
+
+STEP 2: Connect them (click outlet, drag to inlet):
+
+1. button → t b b
+2. t b b (left) → uzi
+3. t b b (right) → message "0"
+4. message "0" → uzi (right inlet)
+5. uzi → unpack i i
+6. unpack → t i i i
+7. t i i i (left) → pack i s i (left inlet)
+8. t i i i (middle) → + (left inlet)
+9. offset number → + (right inlet)
+10. + → message "path live_set visible_tracks $1"
+11. + → pack i s i (right inlet)
+12. message → live.path
+13. live.path (right outlet) → t b l
+14. t b l (left) → message "get name"
+15. message "get name" → live.observer (left)
+16. t b l (right) → live.observer (right)
+17. live.observer → unpack s s
+18. unpack s s (right) → pack i s i (middle inlet)
+19. pack i s i → prepend /trackname
+20. prepend → udpsend
+21. prepend → print
+
+
+STEP 3: Test it!
+
+1. Set offset to 0
+2. Click the button
+3. Open Max console (Cmd+B on Mac, Ctrl+B on Windows)
+4. Should see: /trackname 0 "Track Name" 0
+
+
+TROUBLESHOOTING:
+================
+
+Problem: Max says "couldn't create"
+Solution: Check spelling of object names exactly
+
+Problem: No output in console
+Solution: Make sure print is connected
+
+Problem: "live.path" errors
+Solution: Make sure message is exactly: path live_set visible_tracks $1
+
+Problem: Wrong track names
+Solution: Use "visible_tracks" not "tracks"
+
+Problem: Nothing sent to Bridge
+Solution: Check Bridge is running on port 8088
+
+
+WHAT EACH PART DOES:
+====================
+
+number → Stores offset (0, 8, 16, etc.)
+button → Triggers the refresh
+t b b → Splits signal into two
+0 → Resets the counter
+uzi 8 0 → Loops 8 times (0-7)
+unpack i i → Gets loop index
+t i i i → Splits index into 3 copies
++ → Adds offset to index (0+8=8, 1+8=9, etc.)
+path message → Builds path to track in Live
+live.path → Gets reference to track
+t b l → Splits into bang and list
+get name → Asks for track name
+live.observer → Gets the name from Live
+unpack s s → Extracts the name string
+pack i s i → Combines: display_index, name, actual_track
+prepend → Adds "/trackname" to front
+udpsend → Sends OSC to Bridge (port 8000)
+print → Shows output in console (for debugging)
+
+
+EXPECTED OUTPUT:
+================
+
+When offset = 0:
+/trackname 0 "1-Audio" 0
+/trackname 1 "2-Audio" 1
+/trackname 2 "3-Audio" 2
+...
+
+When offset = 8:
+/trackname 0 "9-Audio" 8
+/trackname 1 "10-Audio" 9
+/trackname 2 "11-Audio" 10
+...
+
+
+SAVE YOUR WORK:
+===============
+
+1. File → Save As
+2. Name: TDS-8 Auto.amxd
+3. Save in: Ableton User Library/Presets/Audio Effects/Max Audio Effect/
+4. Now you can drag it onto any track!
+
+
+NEED MORE HELP?
+===============
+
+See: BUILD_M4L_PATCH_STEP_BY_STEP.md for detailed instructions with screenshots descriptions.

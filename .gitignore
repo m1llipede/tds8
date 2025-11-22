@@ -1,0 +1,56 @@
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# Build outputs
+dist/
+build/
+*.bin
+*.hex
+*.elf
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Arduino build files
+*.ino.bin
+*.ino.elf
+*.ino.map
+
+# Electron build artifacts
+out/
+.webpack/
+
+# macOS
+.AppleDouble
+.LSOverride
+._*
+Parts/12.3-DSI-TOUCH-A-250528/12.3-DSI-TOUCH-A-250528/Waveshare-DSI-LCD-6.6-250528.img
+*.img
+
+TDS-8_Bridge/win-unpacked/
+TDS-8_Release_v_0.98/*.exe

@@ -1,0 +1,75 @@
+ARDUINO FIX FOR /trackname PARSING
+====================================
+
+REPLACE lines 1643-1693 in OLED33.ino with this code:
+
+  // /trackname <idx> "name" [actualTrack]
+  if (cmd.startsWith("/trackname")) {
+    int sp1 = cmd.indexOf(' ');
+    if (sp1 > 0) {
+      int sp2 = cmd.indexOf(' ', sp1 + 1);
+      if (sp2 > 0) {
+        int idx = cmd.substring(sp1 + 1, sp2).toInt();
+        
+        // Find quoted name - look for opening quote
+        int quoteStart = cmd.indexOf('"', sp2);
+        if (quoteStart > 0) {
+          // Find closing quote
+          int quoteEnd = cmd.indexOf('"', quoteStart + 1);
+          if (quoteEnd > 0) {
+            // Extract name between quotes
+            String name = cmd.substring(quoteStart + 1, quoteEnd);
+            name.trim();
+            
+            // Look for actualTrack after closing quote
+            int actualTrack = idx; // Default to display index
+            int sp3 = cmd.indexOf(' ', quoteEnd + 1);
+            if (sp3 > 0) {
+              actualTrack = cmd.substring(sp3 + 1).toInt();
+            }
+            
+            if (idx >= 0 && idx < numScreens) {
+              if (!abletonBannerShown) {
+                abletonBannerShown = true;
+                if (!wiredOnly) wantAbletonBanner = true;
+              }
+
+              // If name is "Track", treat it as blank. Otherwise, use the provided name.
+              String finalName = (name == "Track") ? "" : name;
+
+              trackNames[idx] = finalName;
+              actualTrackNumbers[idx] = actualTrack;
+              drawTrackName(idx, trackNames[idx]);
+              Serial.printf("OK: /trackname %d \"%s\" (track %d)\n", idx, finalName.c_str(), actualTrack);
+            } else {
+              Serial.println("ERR: Index out of range (0-7)");
+            }
+            return;
+          }
+        }
+      }
+    }
+    Serial.println("ERR: Format: /trackname <idx> \"name\" [actualTrack]");
+    return;
+  }
+
+EXPLANATION:
+============
+
+OLD CODE (BROKEN):
+- Used space as delimiter: cmd.indexOf(' ', sp2 + 1)
+- For "Track 1", stopped at first space, only captured "Track"
+
+NEW CODE (FIXED):
+- Looks for opening quote: cmd.indexOf('"', sp2)
+- Finds closing quote: cmd.indexOf('"', quoteStart + 1)
+- Extracts full name between quotes
+- Then looks for actualTrack AFTER closing quote
+
+TEST:
+=====
+Command: /trackname 0 "Track 1" 0
+Result:  idx=0, name="Track 1", actualTrack=0
+
+Command: /trackname 5 "My Custom Track" 6
+Result:  idx=5, name="My Custom Track", actualTrack=6

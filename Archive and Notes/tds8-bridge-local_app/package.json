@@ -1,0 +1,48 @@
+{
+  "name": "tds8-bridge-app",
+  "version": "0.1.0",
+  "description": "Electron wrapper for TDS-8 Bridge (PlayOptix)",
+  "main": "main.js",
+  "author": "PlayOptix",
+  "license": "Proprietary",
+  "scripts": {
+    "electron:dev": "electron .",
+    "electron:build:win-portable": "electron-builder --win portable",
+    "electron:build": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^28.2.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.playoptix.tds8bridge",
+    "productName": "TDS-8 Bridge",
+    "files": [
+      "**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../TDS-8_Bridge/resources/tds8-bridge",
+        "to": "tds8-bridge",
+        "filter": [
+          "**/*",
+          "!node_modules/.bin",
+          "!node_modules/electron"
+        ]
+      }
+    ],
+    "asar": true,
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "icon": "../tds8-bridge/assets/icon-white.png",
+      "target": [ "portable" ],
+      "artifactName": "TDS-8-Bridge.exe"
+    },
+    "mac": {
+      "icon": "../tds8-bridge/assets/icon-white.png",
+      "category": "public.app-category.music"
+    }
+  }
+}

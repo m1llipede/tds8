@@ -1,0 +1,46 @@
+TDS-8 (Digital Scribble Strip) Quick Start for Windows or MacOS
+Digital 8-Channel Track Display System for Ableton Live and more. Great for audio mixers, MIDI controllers or anything that needs dynamic updating of graphics or labels. The TDS-8 automatically polls track names from Ableton Live over OSC, with a friendly web dashboard for automatic or manual Track Names and links to the newest firmware updates.
+Quick Start - Windows or MacOS
+Download and unzip "TDS-8_Master" project folder. Once extracted, the folder contents are:
+Playoptix-website folder
+TDS-8_Bridge folder
+TDS-8 Bridge.exe (Windows)
+TDS-8 Bridge.app (MacOS)
+TDS-8.amxd (Max4Live Device)
+This Quickstart PDF
+
+Connect the TDS-8’s
+Plug your TDS-8 Display directly into a USB-C or USB-A port. If using multiple TDS-8 Displays, use a good USB-C hub or 4-port splitter.
+Recommended: your preferred 4-port USB-C hub like this one: https://www.amazon.com/dp/B0F5HSNDXF
+Plug 1–4 TDS-8 units into the hub with USB-C cables like these: https://www.amazon.com/dp/B0DPBDF6ZZ
+Wait ~10 seconds:
+TDS-8 will display track names on the bottom of the display, with a rectangle around the perimeter. This TDS-8, if not currently connected to Ableton Live, will await a refresh or manual Track Name entry.
+
+Launch the TDS-8 Bridge
+If using Ableton Live, dragging the TDS-8.amxd onto an empty track will automatically launch the dashboard and backend processes. If using another DAW or need manual track entries, you can launch TDS-8 Bridge.exe (Windows) or TDS-8 Bridge.app (Mac OS), to manually enter Track Names.
+
+Open Ableton Live.
+In the "TDS-8_Bridge" folder, find "TDS-8.amxd".
+Drag "TDS-8.amxd" onto an EMPTY MIDI track in Ableton
+Wait ~20–30 seconds as it will automatically open the backend bridge needed to talk to the TDS-8 device(s):
+The bridge shows Ableton as Connected.
+Track names from Ableton appear on the TDS-8 displays.
+Alternatively, you can manually enter your own track names and hit the Update Track Names button.
+Changes appear on the hardware almost instantly.
+
+Firmware Updates (Optional for future updates)
+Choose a Firmware Release / Asset.
+Choose a Target Device.
+Click "Flash" and wait for the device to reboot.
+You can flash firmware multiple times in one session.
+
+What’s in the box
+TDS-8 Display
+USB-C cable
+Quick start QR Code to launch this page
+OSC commands (if needed for testing)
+/trackname <idx> <name…>
+/activetrack <idx>
+/ping → device prints /pong 1
+/reannounce (no-op in USB mode)
+
