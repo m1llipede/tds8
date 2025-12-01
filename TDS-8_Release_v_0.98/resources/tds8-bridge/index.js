@@ -504,6 +504,25 @@ app.get('/', (req, res) => {
 const ASSETS_DIR = path.join(__dirname, 'assets');
 app.use('/assets', express.static(ASSETS_DIR));
 
+// Resolve Python command for firmware flashing
+// - On Windows, prefer an embedded python.exe in a local 'python' subfolder
+// - Otherwise, fall back to system 'python' on PATH
+function getPythonCommand() {
+  try {
+    if (process.platform === 'win32') {
+      const embeddedPython = path.join(__dirname, 'python', 'python.exe');
+      if (fs.existsSync(embeddedPython)) {
+        console.log(`[FLASH] Using embedded Python at: ${embeddedPython}`);
+        return `"${embeddedPython}"`;
+      }
+    }
+  } catch (e) {
+    console.warn('[FLASH] Embedded Python check failed:', e.message);
+  }
+  console.log('[FLASH] Falling back to system "python" on PATH');
+  return 'python';
+}
+
 app.post('/api/firmware/flash', async (req, res) => {
   const { devicePath, firmwareUrl } = req.body;
   if (!devicePath || !firmwareUrl) {
@@ -545,7 +564,8 @@ app.post('/api/firmware/flash', async (req, res) => {
   }
 
   // 3. Execute esptool.py
-  const esptoolCommand = `python -m esptool --chip esp32c3 --port ${devicePath} --baud 115200 write_flash -z 0x0 ${tmpFile.name}`;
+  const pythonCmd = getPythonCommand();
+  const esptoolCommand = `${pythonCmd} -m esptool --chip esp32c3 --port ${devicePath} --baud 115200 write_flash -z 0x0 "${tmpFile.name}"`;
   uiLog(`[FLASH] Executing: ${esptoolCommand}`);
   const child = exec(esptoolCommand);
 
@@ -1267,6 +1287,57 @@ app.post('/api/disconnect', async (req, res) => {
   } catch (e) { 
     console.error('Disconnect error:', e);
     res.status(500).json({ error: e.message }); 
+  }
+});
+
+// Disconnect all devices and clear serial port tracking
+app.post('/api/disconnect-all', async (req, res) => {
+  try {
+    console.log('🔌 [DISCONNECT-ALL] Closing all serial ports...');
+
+    // Close multi-device serial ports
+    if (Array.isArray(devices) && devices.length > 0) {
+      for (const d of devices) {
+        if (d && d.serial && d.serial.isOpen) {
+          try {
+            await new Promise((resolve, reject) => {
+              d.serial.close(err => (err ? reject(err) : resolve()));
+            });
+            console.log(`🔌 [DISCONNECT-ALL] Closed ${d.path || 'unknown path'}`);
+          } catch (err) {
+            console.error(`❌ [DISCONNECT-ALL] Error closing ${d.path || 'unknown path'}:`, err.message);
+          }
+        }
+      }
+    }
+
+    // Close legacy single-device serial if still open
+    if (serial && serial.isOpen) {
+      try {
+        await new Promise((resolve, reject) => {
+          serial.close(err => (err ? reject(err) : resolve()));
+        });
+        console.log('🔌 [DISCONNECT-ALL] Closed legacy serial port');
+      } catch (err) {
+        console.error('❌ [DISCONNECT-ALL] Error closing legacy serial port:', err.message);
+      }
+      serial = null;
+      serialPath = null;
+    }
+
+    // Clear in-memory tracking so reconnection starts clean
+    devices = [];
+    connectingPorts.clear();
+    portToDeviceId.clear();
+    recentlyClosed.clear();
+
+    // Notify UI so it can rescan
+    wsBroadcast({ type: 'serial-close', path: null });
+
+    res.json({ ok: true, message: 'All devices disconnected and ports cleared.' });
+  } catch (e) {
+    console.error('Disconnect-all error:', e);
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 

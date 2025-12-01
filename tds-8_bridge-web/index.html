@@ -91,8 +91,8 @@ select.input{cursor:pointer}
         <!-- Devices -->
         <div class="card">
           <div class="hdr" style="position:relative;padding:8px 16px;">
-            <img src="logos/PlayOptix%20Logo/Playoptix%20Logo-white-transparent.png" alt="Playoptix" style="position:absolute;left:12px;top:10px;height:32px;opacity:0.95"/>
-            <img src="logos/TDS-8%20Logo-white.png" alt="TDS-8" style="height:164px;display:block;margin:0 auto"/>
+            <img src="logos/PlayOptix%20Logo/Playoptix%20Logo-white-transparent.png" alt="Playoptix" style="position:absolute;left:12px;top:10px;height:26px;opacity:0.95"/>
+            <img src="logos/TDS-8%20Logo-white.png" alt="TDS-8" style="height:190px;display:block;margin:0 auto"/>
           </div>
           <div class="body">
             <div id="deviceList" class="device-list">
@@ -808,7 +808,7 @@ async function fetchFirmwareReleases() {
         release.assets.forEach(asset => {
           const option = document.createElement('option');
           option.value = asset.browser_download_url;
-          option.textContent = `${release.name} - ${asset.name}`;
+          option.textContent = asset.name;
           select.appendChild(option);
         });
       });
@@ -1295,17 +1295,30 @@ async function flashFirmware() {
     const sel = document.getElementById('fwDeviceSelect');
     const btn = document.getElementById('btnFlash');
     if (!urlInput || !sel) return;
+
     const url = (urlInput.value || '').trim();
-    if (!url) { log('✗ Firmware URL required', 'err'); return; }
-    const body = {};
-    if (/\.json($|\?)/i.test(url)) body.manifest = url; else body.url = url;
-    if (sel.value && sel.value.startsWith('id:')) {
-      const id = parseInt(sel.value.slice(3), 10);
-      if (!Number.isNaN(id)) body.deviceId = id;
+    if (!url) {
+      log('✗ Firmware URL required', 'err');
+      return;
     }
-    if (btn) { btn.disabled = true; btn.textContent = 'Flashing…'; }
+
+    if (!sel.value) {
+      log('✗ Please select a target device', 'err');
+      return;
+    }
+
+    const body = {
+      devicePath: sel.value,
+      firmwareUrl: url
+    };
+
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Flashing…';
+    }
+
     log('⬇️ Downloading firmware and flashing device…', 'info');
-    const res = await fetch('/api/flash', {
+    const res = await fetch('/api/firmware/flash', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
