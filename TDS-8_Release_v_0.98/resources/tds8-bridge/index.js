@@ -365,6 +365,9 @@ function initOSCListener() {
                       return;
                     }
                     
+                    if (globalIndex >= 0 && globalIndex < 32) {
+                      try { globalTrackNames[globalIndex] = nameStr; } catch {}
+                    }
                     // Multi-device: Route by display block so devices can mirror banks
                     const block = Math.floor(actualTrack / 8);
                     const localIndex = actualTrack % 8;
@@ -1392,6 +1395,7 @@ let currentTrackNames = [
   'Track 1', 'Track 2', 'Track 3', 'Track 4',
   'Track 5', 'Track 6', 'Track 7', 'Track 8'
 ];
+let globalTrackNames = new Array(32).fill('');
 try {
   const raw = fs.readFileSync(TRACK_NAMES_PATH, 'utf8');
   const parsed = JSON.parse(raw);
@@ -1410,13 +1414,61 @@ app.get('/tracks', (_req, res) => {
 // Tracks and active track
 app.get('/api/tracknames', (req, res) => {
   try {
-    const names = (currentTrackNames || []).map(n => {
-      if (typeof n === 'string') return n;
-      if (n && typeof n.name === 'string') return n.name;
-      return '';
-    });
-    res.json({ ok: true, names });
+    const base = Array.isArray(globalTrackNames) ? globalTrackNames : [];
+    const out = new Array(32).fill('');
+    for (let i = 0; i < 32; i++) {
+      const v = base[i];
+      if (typeof v === 'string' && v.length) out[i] = v;
+    }
+    if (out.every(v => !v)) {
+      for (let i = 0; i < Math.min(8, currentTrackNames.length); i++) {
+        const v = currentTrackNames[i];
+        out[i] = typeof v === 'string' ? v : (v && typeof v.name === 'string' ? v.name : '');
+      }
+    }
+    res.json({ ok: true, names: out });
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/api/tracknames/saved', (req, res) => {
+  try {
+    const savedPath = path.join(__dirname, 'track_names.json');
+    if (fs.existsSync(savedPath)) {
+      const raw = fs.readFileSync(savedPath, 'utf8');
+      const json = JSON.parse(raw);
+      let names = Array.isArray(json) ? json : (json && Array.isArray(json.names) ? json.names : []);
+      const out = new Array(32).fill('');
+      for (let i = 0; i < Math.min(32, names.length); i++) {
+        const v = names[i];
+        out[i] = typeof v === 'string' ? v : String(v || '');
+      }
+      return res.json({ ok: true, names: out });
+    }
+    if (fs.existsSync(TRACK_NAMES_PATH)) {
+      const raw = fs.readFileSync(TRACK_NAMES_PATH, 'utf8');
+      const parsed = JSON.parse(raw);
+      let names = Array.isArray(parsed) ? parsed : [];
+      const out = new Array(32).fill('');
+      for (let i = 0; i < Math.min(32, names.length); i++) {
+        const v = names[i];
+        out[i] = typeof v === 'string' ? v : String(v || '');
+      }
+      return res.json({ ok: true, names: out });
+    }
+    const base = Array.isArray(globalTrackNames) ? globalTrackNames : [];
+    const out = new Array(32).fill('');
+    for (let i = 0; i < 32; i++) {
+      const v = base[i];
+      if (typeof v === 'string' && v.length) out[i] = v;
+    }
+    if (out.every(v => !v)) {
+      for (let i = 0; i < Math.min(8, currentTrackNames.length); i++) {
+        const v = currentTrackNames[i];
+        out[i] = typeof v === 'string' ? v : (v && typeof v.name === 'string' ? v.name : '');
+      }
+    }
+    return res.json({ ok: true, names: out });
+  } catch (e) { return res.status(400).json({ ok: false, error: e.message }); }
 });
 
 // New endpoint to save all track names to a file
@@ -1472,6 +1524,9 @@ app.post('/api/trackname', (req, res) => {
       return res.json({ ok: true, dedup: true });
     }
 
+    if (Number.isFinite(at) && at >= 0 && at < 32) {
+      try { globalTrackNames[Number(at)] = nameStr; } catch {}
+    }
     // Calculate which device should receive this track (based on actualTrack)
     const targetDeviceId = Math.floor(at / 8);
 

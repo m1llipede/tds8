@@ -702,6 +702,11 @@ function updateOffsetUI() {
 
 function buildTrackGrid() {
   const host = $('#tracks');
+  const prev = new Array(32).fill('');
+  for (let i = 0; i < 32; i++) {
+    const el = document.getElementById('tname' + i);
+    if (el && typeof el.value === 'string') prev[i] = el.value;
+  }
   host.innerHTML = '';
   // Show 8 fields per connected device, default to 8 if none connected
   let numDevices = connectedDevices && connectedDevices.size > 0 ? connectedDevices.size : 1;
@@ -721,7 +726,8 @@ function buildTrackGrid() {
     input.className = 'input';
     input.id = 'tname' + globalIdx;
     input.name = `track-${globalIdx}`;
-    input.value = String(globalIdx + 1);
+    const existing = prev[globalIdx];
+    input.value = (existing && existing.trim() !== '') ? existing : String(globalIdx + 1);
     input.placeholder = `${globalIdx + 1}`;
     input.oninput = () => saveLocalTrackNames();
     row.appendChild(label);
@@ -932,10 +938,11 @@ async function fetchTrackNames() {
     if (data.ok && Array.isArray(data.names)) {
       for (let i = 0; i < data.names.length; i++) {
         const el = document.getElementById('tname' + i);
-        if (el && data.names[i]) {
-          el.value = stripOuterQuotes(data.names[i]);
+        if (el && data.names[i] !== undefined) {
+          el.value = stripOuterQuotes(String(data.names[i]));
         }
       }
+      try { saveLocalTrackNames(); } catch {}
       log('✓ Loaded track names from bridge', 'info');
     } else {
       log('✗ Failed to load track names from bridge', 'err');
@@ -1987,15 +1994,16 @@ window.addEventListener('DOMContentLoaded', () => {
     btnReadTracks.onclick = async () => {
       log('📖 Reading stored track names...', 'info');
       try {
-        const res = await fetch('/api/tracknames');
+        const res = await fetch('/api/tracknames/saved');
         const data = await res.json();
         if (data.ok && data.names) {
-          for (let i = 0; i < 8 && i < data.names.length; i++) {
+          for (let i = 0; i < 32 && i < data.names.length; i++) {
             const inputElement = document.getElementById('tname' + i);
             if (inputElement) {
               inputElement.value = data.names[i] || '';
             }
           }
+          try { saveLocalTrackNames(); } catch {}
           log(`✓ Loaded ${data.names.length} track names from bridge`, 'out');
         } else {
           log('✗ Failed to read track names', 'err');
