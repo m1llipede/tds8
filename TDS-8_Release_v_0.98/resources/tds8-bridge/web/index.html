@@ -90,9 +90,9 @@ select.input{cursor:pointer}
         
         <!-- Devices -->
         <div class="card">
-          <div class="hdr" style="position:relative;padding:8px 16px;">
+          <div class="hdr" style="position:relative;padding:4px 16px;height:184px;overflow:hidden;">
             <img src="assets/Playoptix Logo-white-transparent.png" alt="Playoptix" style="position:absolute;left:12px;top:10px;height:26px;opacity:0.95"/>
-            <img src="assets/icon-white.png" alt="TDS-8" style="height:220px;display:block;margin:0 auto"/>
+            <img src="assets/icon-white.png" alt="TDS-8" style="height:176px;display:block;margin:0 auto;transform:scale(2);transform-origin:center center;"/>
           </div>
           <div class="body">
             <div id="deviceList" class="device-list">
@@ -137,8 +137,7 @@ select.input{cursor:pointer}
           <div class="hdr" style="display:flex;align-items:center">
             <h1 style="margin:0">Serial Monitor</h1>
             <div style="display:flex;align-items:center;gap:10px;margin-left:auto">
-              <button class="btn sm ghost" style="background:#fff;border:2px solid #ef4444;color:#b91c1c" onclick="quitBridge()">Quit Bridge</button>
-              <span style="font-size:11px;color:#fff;opacity:0.9">v112225-01</span>
+              <span style="font-size:11px;color:#fff;opacity:0.9">v120125-01</span>
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
                 <input type="checkbox" id="autoScroll" checked style="cursor:pointer"/>
                 Auto-scroll
@@ -147,12 +146,12 @@ select.input{cursor:pointer}
           </div>
           <div class="body flex">
             <div id="log" class="log"></div>
-            <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:space-between">
               <div class="btn-group" style="gap:6px">
                 <button id="qaRebootAll" class="btn sm ghost" title="Reboot all devices">Reboot All</button>
-                <button id="btnClearPorts" class="btn sm ghost" title="Disconnect all devices and clear ports">Clear Ports</button>
-                <button id="btnRefreshDevices" class="btn sm ghost" title="Scan for devices" style="background:#fff;color:#000;border:2px solid #e3e6ef">Refresh Devices</button>
+                <button id="btnClearPorts" class="btn sm ghost" style="color:#dc2626;border-color:#fecaca;background:#fef2f2" title="Disconnect all devices and clear ports">Clear Ports</button>
               </div>
+              <button class="btn sm ghost" style="background:#fff;border:2px solid #ef4444;color:#b91c1c" onclick="quitBridge()">Quit Bridge</button>
             </div>
             <!-- Compact Connection Controls (moved here) -->
             <div style="margin-top:12px">
@@ -453,8 +452,21 @@ async function scanDevices() {
       : `<div style="font-size:11px;color:#6b7280;margin-top:2px">⚪ Disconnected</div>`;
     
     // Create device item HTML
+    const currentDevId = (isConnected && deviceInfo) ? deviceInfo.deviceId : null;
+    
+    // Determine which ID to show as selected in dropdown
+    let selectedIdForDropdown = 0;
+    if (isConnected && deviceInfo) {
+      selectedIdForDropdown = deviceInfo.deviceId;
+    } else if (p.serialNumber && deviceIdMap.has(p.serialNumber)) {
+      selectedIdForDropdown = deviceIdMap.get(p.serialNumber);
+    } else {
+      // Auto logic for disconnected
+      selectedIdForDropdown = idx % 4;
+    }
+
     const deviceIdOptions = [0, 1, 2, 3].map(id => 
-      `<option value="${id}" ${id === idx ? 'selected' : ''}>Tracks ${id * 8 + 1}-${(id + 1) * 8}</option>`
+      `<option value="${id}" ${id === selectedIdForDropdown ? 'selected' : ''}>Tracks ${id * 8 + 1}-${(id + 1) * 8}</option>`
     ).join('');
     
     item.innerHTML = `
@@ -466,11 +478,9 @@ async function scanDevices() {
             <div class="m4l-status" style="font-size:11px;margin-top:2px">${isM4LConnected ? '<span style="color:#10b981;">🎵 M4L Connected</span>' : '<span style="color:#ef4444;">⚠️ M4L Disconnected</span>'}</div>
           </div>
           <div style="display:flex;align-items:center;gap:8px">
-            ${!isConnected ? 
-              `<select class="input sm" style="width:140px;font-size:11px;padding:4px 6px" data-path="${p.path}">
-                ${deviceIdOptions}
-              </select>` : ''
-            }
+            <select class="input sm" style="width:140px;font-size:11px;padding:4px 6px" data-path="${p.path}" onchange="onTrackRangeChange(this, '${p.path}')">
+              ${deviceIdOptions}
+            </select>
             ${isConnected ? 
               `<button class="btn ghost sm" onclick="disconnect('${p.path}')">Disconnect</button>` :
               `<button class="btn primary sm" onclick="connect('${p.path}', '${deviceName}', '${p.serialNumber || ''}')">Connect</button>`
@@ -506,7 +516,6 @@ async function scanDevices() {
       }
       if (p.serialNumber) {
         deviceIdMap.set(p.serialNumber, deviceId);
-        log(`🆕 Auto-assigned Device ID ${deviceId} to serial ${p.serialNumber}`, 'info');
       }
     }
     
@@ -517,6 +526,54 @@ async function scanDevices() {
   } catch (err) {
     log(`✗ Error scanning devices: ${err.message}`, 'err');
     console.error('Scan error:', err);
+  }
+}
+
+// Handle track range dropdown change live
+async function onTrackRangeChange(selectEl, path) {
+  const newDeviceId = parseInt(selectEl.value);
+  if (isNaN(newDeviceId)) return;
+
+  // Update persistence
+  // Find serial number for this path if possible
+  let serial = null;
+  // Try connected devices first
+  if (connectedDevices.has(path)) {
+    serial = connectedDevices.get(path).serialNum;
+  } else {
+    // Try to find in stored data or wait for connect
+  }
+  
+  if (serial) {
+    deviceIdMap.set(serial, newDeviceId);
+  }
+
+  // If connected, update the live mapping
+  if (connectedDevices.has(path)) {
+    const dev = connectedDevices.get(path);
+    dev.deviceId = newDeviceId;
+    dev.trackRange = `${newDeviceId * 8 + 1}-${(newDeviceId + 1) * 8}`;
+    connectedDevices.set(path, dev);
+    
+    log(`🔄 Remapped ${dev.name || path} to Device ID ${newDeviceId} (Tracks ${dev.trackRange})`, 'info');
+    
+    // Notify backend: send DEVICE_ID to this device by path (no reconnect needed)
+    try {
+      await fetch('/api/send-command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: `DEVICE_ID ${newDeviceId}`, path })
+      });
+    } catch (e) {
+      console.error('Failed to update device mapping:', e);
+    }
+    
+    // Refresh UI
+    scanDevices();
+    buildTrackGrid();
+  } else {
+    // Just log preference save
+    log(`💾 Preference saved: Next connection to this device will use ID ${newDeviceId}`, 'info');
   }
 }
 
@@ -567,6 +624,8 @@ async function connect(path, name, serialNum, retryCount = 0) {
       connectedDevices.set(path, { name, path, serialNum, deviceId, trackRange });
       currentDevice = path;
       updateConnectionStatus(true);
+      
+      // IMMEDIATE UX FIX: Force IP display now, don't wait for serial log
       updateConnectionBanner('wired', '127.0.0.1');
       
       // Backend now sends DEVICE_ID command, no need to send it here
@@ -733,11 +792,18 @@ function resetTracks() {
 
 async function saveTracksToBridge() {
   log('💾 Saving track names to bridge...', 'info');
-  const names = [];
-  for (let i = 0; i < 32; i++) {
-    const el = document.getElementById('tname' + i);
-    names.push(el ? el.value : '');
-  }
+  
+  // Optimization: Fast DOM read
+  const inputs = document.querySelectorAll('input[name^="track-"]');
+  const names = new Array(32).fill('');
+  
+  inputs.forEach(input => {
+    const idStr = input.id.replace('tname', '');
+    const idx = parseInt(idStr);
+    if (!isNaN(idx) && idx >= 0 && idx < 32) {
+      names[idx] = input.value || '';
+    }
+  });
 
   try {
     const res = await fetch('/api/tracknames', {
@@ -747,7 +813,7 @@ async function saveTracksToBridge() {
     });
     const data = await res.json();
     if (data.ok) {
-      log('✓ Track names saved to bridge successfully', 'out');
+      log('✓ Track names updated successfully', 'out');
     } else {
       log(`✗ Failed to save track names: ${data.error || 'Unknown error'}`, 'err');
     }

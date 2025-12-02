@@ -3,12 +3,62 @@
 
 const { app, BrowserWindow, Tray, Menu, ipcMain, shell } = require('electron');
 const path = require('path');
-const { spawn } = require('child_process');
+const fs = require('fs');
+const { spawn, exec } = require('child_process');
 
 let mainWindow = null;
 let tray = null;
 let bridgeProcess = null;
 const BRIDGE_PORT = 8088;
+
+// Helper for delays
+const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Kill other instances and clear port 8088
+async function cleanStartup() {
+  const myPid = process.pid;
+  console.log(`[Startup] My PID: ${myPid}. Cleaning up other instances...`);
+
+  return new Promise(async (resolve) => {
+    try {
+      // 1. Kill other TDS-8 Bridge.exe instances (excluding self)
+      // /FI "PID ne myPid" filters out the current process
+      const killAppCmd = `taskkill /F /IM "TDS-8-Bridge.exe" /FI "PID ne ${myPid}"`;
+      exec(killAppCmd, (err) => {
+        // Ignore errors (e.g., if no other process exists)
+        if (!err) console.log('[Startup] Killed other Bridge instances.');
+      });
+      
+      await wait(500);
+
+      // 2. Kill anything on Port 8088 (Node backend)
+      // Find PID on port 8088
+      exec(`netstat -aon | findstr :${BRIDGE_PORT}`, (err, stdout) => {
+        if (stdout) {
+          const lines = stdout.split('\n');
+          lines.forEach(line => {
+            const parts = line.trim().split(/\s+/);
+            if (parts.length >= 5) {
+              const pid = parts[4];
+              // Don't kill self if for some reason we are on that port (unlikely at this stage)
+              if (parseInt(pid) !== myPid && parseInt(pid) > 0) {
+                console.log(`[Startup] Killing PID ${pid} on port ${BRIDGE_PORT}`);
+                exec(`taskkill /F /PID ${pid}`);
+              }
+            }
+          });
+        }
+      });
+
+      await wait(2000); // Wait 2 seconds for OS to release ports/handles
+      console.log('[Startup] Cleanup complete.');
+      resolve();
+    } catch (e) {
+      console.error('[Startup] Cleanup error:', e);
+      resolve(); // Proceed anyway
+    }
+  });
+}
 
 // Start the bridge server
 function startBridge() {
@@ -40,7 +90,9 @@ function createWindow() {
     minWidth: 1200,
     minHeight: 900,
     title: 'TDS-8 Bridge',
-    icon: path.join(__dirname, 'assets', 'icon-white.png'),
+    icon: (fs.existsSync(path.join(__dirname, 'assets', 'icon-white.png'))
+      ? path.join(__dirname, 'assets', 'icon-white.png')
+      : undefined),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -53,7 +105,7 @@ function createWindow() {
 
   // Wait for bridge to start, then load with retry logic
   let loadAttempts = 0;
-  const maxAttempts = 10;
+  const maxAttempts = 15;
   
   const tryLoadURL = () => {
     loadAttempts++;
@@ -68,7 +120,7 @@ function createWindow() {
     });
   };
   
-  // Start first attempt after 2 seconds
+  // Start first attempt after 2 seconds (giving Node time to boot)
   setTimeout(tryLoadURL, 2000);
 
   mainWindow.once('ready-to-show', () => {
@@ -108,9 +160,13 @@ function createWindow() {
 function createTray() {
   // Use a simple icon (you can replace with custom icon)
   const iconPath = path.join(__dirname, 'assets', 'icon-white.png');
-  
+  if (!fs.existsSync(iconPath)) {
+    console.warn('[Tray] Icon not found, skipping tray creation.');
+    return;
+  }
+
   tray = new Tray(iconPath);
-  
+
   const contextMenu = Menu.buildFromTemplate([
     {
       label: 'Show TDS-8',
@@ -155,7 +211,8 @@ function createTray() {
 }
 
 // App lifecycle
-app.on('ready', () => {
+app.on('ready', async () => {
+  await cleanStartup();
   startBridge();
   createWindow();
   createTray();

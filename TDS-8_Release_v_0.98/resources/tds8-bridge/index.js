@@ -32,6 +32,9 @@ const connectingPorts = new Set(); // ports currently being opened
 const portToDeviceId = new Map();  // sticky mapping of port -> deviceId
 const recentlyClosed = new Map();  // port -> timestamp of last close
 const RECONNECT_COOLDOWN_MS = 15000; // 15 second cooldown to prevent boot loop reconnects // wait before re-opening after a close
+// Allow remapping of 8-track display blocks (0..3) to any connected device(s).
+// Keyed by serial path so it survives reconnects on the same COM port.
+const pathToDisplayBlock = new Map(); // path -> block index (0..3)
 
 // Global-level dedup keyed by actual track number (0..31)
 const lastGlobalTrack = new Map(); // key: globalIndex → { name, ts }
@@ -362,26 +365,26 @@ function initOSCListener() {
                       return;
                     }
                     
-                    // Multi-device: Route to correct device based on track number
-                    const deviceId = Math.floor(actualTrack / 8);
+                    // Multi-device: Route by display block so devices can mirror banks
+                    const block = Math.floor(actualTrack / 8);
                     const localIndex = actualTrack % 8;
-                    const targetDevice = devices.find(d => d.id === deviceId);
+                    const matched = devices.filter(d => (typeof d.displayBlock === 'number' ? d.displayBlock : d.id) === block);
 
-                    if (targetDevice) {
-                        if (shouldSendTrackname(deviceId, localIndex, escNorm)) {
-                          const cmd = `/trackname ${localIndex} "${esc}" ${actualTrack}\n`;
-                          const delay = Math.max(0, (Number.isFinite(localIndex) ? localIndex : 0) * 100);
-                          setTimeout(() => sendToDevice(deviceId, cmd), delay);
-                          console.log(`📍 Routed track ${actualTrack} to Device ${deviceId} (local index ${localIndex}, delay ${delay}ms)`);
-                        } else {
-                          console.log(`⏭️  Deduped /trackname for Device ${deviceId} idx ${localIndex}`);
-                        }
+                    if (matched.length > 0) {
+                        const cmd = `/trackname ${localIndex} "${esc}" ${actualTrack}\n`;
+                        const delay = Math.max(0, (Number.isFinite(localIndex) ? localIndex : 0) * 100);
+                        matched.forEach(d => {
+                          if (shouldSendTrackname(d.id, localIndex, escNorm)) {
+                            setTimeout(() => sendToDevice(d.id, cmd), delay);
+                            console.log(`📍 Routed track ${actualTrack} to Device ${d.id} (block ${block}, local ${localIndex}, delay ${delay}ms)`);
+                          }
+                        });
                     } else if (devices.length > 0) {
                         // Fallback for single connected device if routing fails
-                        const fallbackId = devices[0].id;
-                        if (shouldSendTrackname(fallbackId, displayIndex, escNorm)) {
-                          const cmd = `/trackname ${displayIndex} "${esc}" ${actualTrack}\n`;
-                          const delay = Math.max(0, (Number.isFinite(displayIndex) ? displayIndex : 0) * 100);
+                        const fallbackId = devices[0].id;        
+                        if (shouldSendTrackname(fallbackId, localIndex, escNorm)) {
+                          const cmd = `/trackname ${localIndex} "${esc}" ${actualTrack}\n`;
+                          const delay = Math.max(0, (Number.isFinite(localIndex) ? localIndex : 0) * 100);
                           setTimeout(() => sendToDevice(fallbackId, cmd), delay);
                         } else {
                           console.log(`⏭️  Deduped /trackname for fallback Device ${fallbackId} idx ${displayIndex}`);
@@ -389,9 +392,9 @@ function initOSCListener() {
                     } else {
                         // Single device mode (legacy)
                         if (serial && serial.isOpen) {
-                            if (shouldSendTrackname(0, displayIndex, escNorm)) {
-                              const cmd = `/trackname ${displayIndex} "${esc}" ${actualTrack}\n`;
-                              const delay = Math.max(0, (Number.isFinite(displayIndex) ? displayIndex : 0) * 100);
+                            if (shouldSendTrackname(0, localIndex, escNorm)) {
+                              const cmd = `/trackname ${localIndex} "${esc}" ${actualTrack}\n`;
+                              const delay = Math.max(0, (Number.isFinite(localIndex) ? localIndex : 0) * 100);
                               setTimeout(() => send(cmd), delay);
                             } else {
                               console.log(`⏭️  Deduped /trackname for legacy serial idx ${displayIndex}`);
@@ -400,33 +403,26 @@ function initOSCListener() {
                             // Silently ignore if the single-device serial port isn't open
                         }
                     }
-
-                    // Store the UNESCAPED name for UI/API (limited to first 8 fields)
-                    if (Number.isFinite(globalIndex) && globalIndex >= 0 && globalIndex < 8) {
-                        currentTrackNames[globalIndex] = String(nameRaw);
-                    }
                 }
                 else if (oscMsg.address === "/activetrack" && oscMsg.args.length >= 1) {
                     const index = oscMsg.args[0].value;
                     if (!Number.isFinite(index) || index < 0 || index >= 32) {
                       return;
                     }
-                    const deviceId = Math.floor(index / 8);
+                    const block = Math.floor(index / 8);
                     const localIndex = index % 8;
                     if (devices && devices.length > 0) {
-                    const targetDevice = devices.find(d => d.id === deviceId);
-                    if (targetDevice) {
-                        // Send selection to target device
-                        sendToDevice(deviceId, `/activetrack ${localIndex}\n`);
-                        // Clear selection on all other devices
-                        devices.filter(d => d.id !== deviceId && d.serial && d.serial.isOpen)
+                      const matched = devices.filter(d => (typeof d.displayBlock === 'number' ? d.displayBlock : d.id) === block);
+                      // Set active on matched devices, clear others
+                      if (matched.length > 0) {
+                        matched.forEach(d => sendToDevice(d.id, `/activetrack ${localIndex}\n`));
+                        devices.filter(d => !matched.includes(d))
                                .forEach(d => sendToDevice(d.id, `/activetrack -1\n`));
-                    } else if (devices.length === 1) {
+                      } else if (devices.length === 1) {
                         sendToDevice(devices[0].id, `/activetrack ${localIndex}\n`);
-                    } else {
-                        // No exact match; conservatively clear all then no-op (or choose first)
+                      } else {
                         sendToAll(`/activetrack -1\n`);
-                    }
+                      }
                     } else {
                     send(`/activetrack ${index}\n`);
                     }
@@ -1078,7 +1074,8 @@ app.post('/api/connect', async (req, res) => {
       path: desired,
       buffer: '',
       version: null,
-      deviceID: deviceId
+      deviceID: deviceId,
+      displayBlock: pathToDisplayBlock.has(desired) ? pathToDisplayBlock.get(desired) : deviceId
     };
     
     // Open port with minimal intervention
@@ -1135,7 +1132,8 @@ app.post('/api/connect', async (req, res) => {
     setTimeout(() => {
       if (devices.find(d => d.id === deviceId && d.path === desired)) {
         console.log(`📤 Sending init commands to Device ${deviceId + 1}...`);
-        sendToDevice(deviceId, `DEVICE_ID ${deviceId}\n`);
+        const block = (device && typeof device.displayBlock === 'number') ? device.displayBlock : deviceId;
+        sendToDevice(deviceId, `DEVICE_ID ${block}\n`);
         setTimeout(() => sendToDevice(deviceId, 'VERSION\n'), 500);
       }
     }, 3000);
@@ -1209,6 +1207,27 @@ app.post('/api/send-command', (req, res) => {
   try {
     const { command, deviceId, path } = req.body;
     if (!command) throw new Error('Missing command');
+    
+    // Persist display-block mapping if DEVICE_ID is being set by path
+    try {
+      const m = /^DEVICE_ID\s+(\d+)/i.exec(String(command));
+      if (m) {
+        const block = parseInt(m[1]);
+        if (path) {
+          pathToDisplayBlock.set(path, block);
+          const dev = devices.find(d => d.path === path);
+          if (dev) dev.displayBlock = block;
+          console.log(`🧭 Mapped ${path} -> displayBlock ${block}`);
+        } else if (deviceId !== undefined) {
+          const dev = devices.find(d => d.id === deviceId || d.deviceID === deviceId);
+          if (dev) {
+            dev.displayBlock = block;
+            pathToDisplayBlock.set(dev.path, block);
+            console.log(`🧭 Mapped deviceId ${dev.id} (${dev.path}) -> displayBlock ${block}`);
+          }
+        }
+      }
+    } catch {}
     
     // If deviceId specified, send to that device
     if (deviceId !== undefined && devices.length > 0) {
@@ -2030,7 +2049,8 @@ async function autoConnectDevices() {
           path: port.path,
           buffer: '',
           version: null,
-          deviceID: deviceId
+          deviceID: deviceId,
+          displayBlock: pathToDisplayBlock.has(port.path) ? pathToDisplayBlock.get(port.path) : deviceId
         };
         
         // Open port and wait for stabilization
@@ -2064,7 +2084,8 @@ async function autoConnectDevices() {
         setTimeout(() => {
           if (devices.find(d => d.id === deviceId && d.path === port.path)) {
             console.log(`📤 Sending init commands to Device ${deviceId + 1}...`);
-            sendToDevice(deviceId, `DEVICE_ID ${deviceId}\n`);
+            const block = (device && typeof device.displayBlock === 'number') ? device.displayBlock : deviceId;
+            sendToDevice(deviceId, `DEVICE_ID ${block}\n`);
             setTimeout(() => sendToDevice(deviceId, 'VERSION\n'), 500);
           }
         }, 3000);
