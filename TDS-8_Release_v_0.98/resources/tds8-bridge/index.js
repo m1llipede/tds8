@@ -53,11 +53,52 @@ function shouldForwardGlobal(globalIndex, nameEscaped) {
 
 // Debounce /reannounce so M4L doesn't get spammed
 let lastReannounceTs = 0;
-function requestReannounce() {
+
+// Minimum interval between automatic full track-name sweeps
+const TRACK_SWEEP_MIN_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+let lastTrackSweepTs = 0;
+
+function requestReannounce(forceSweep = false) {
   const now = Date.now();
-  if (now - lastReannounceTs < 2000) return; // 2s gate
+  if (now - lastReannounceTs < 2000) return; // 2s gate for sending /reannounce
   lastReannounceTs = now;
   try { sendOSC('/reannounce', []); } catch {}
+  // After sending /reannounce, start requesting track names from M4L
+  setTimeout(() => { startTrackNameRequests(forceSweep); }, 500);
+}
+
+// Request track names from M4L one at a time
+let trackRequestIndex = 0;
+let trackRequestTimer = null;
+function requestNextTrackName() {
+  if (trackRequestIndex >= 32) {
+    console.log('✅ Finished requesting all 32 track names from M4L');
+    trackRequestIndex = 0;
+    return;
+  }
+  try {
+    const m4lIndex = trackRequestIndex + 1; // M4L expects 1–32
+    sendOSC('/request-trackname', [{ type: 'i', value: m4lIndex }]);
+    console.log(`📤 Requested track name for index ${trackRequestIndex} (M4L=${m4lIndex}) from M4L`);
+    trackRequestIndex++;
+    // Wait ~250ms before requesting next track (~2x faster sweep than original, more relaxed pacing)
+    trackRequestTimer = setTimeout(requestNextTrackName, 250);
+  } catch (e) {
+    console.error('Error requesting track name:', e);
+  }
+}
+
+function startTrackNameRequests(force = false) {
+  const now = Date.now();
+  if (!force && lastTrackSweepTs && (now - lastTrackSweepTs) < TRACK_SWEEP_MIN_INTERVAL_MS) {
+    const secondsAgo = Math.round((now - lastTrackSweepTs) / 1000);
+    console.log(`⏭️  Skipping track-name sweep; last run ${secondsAgo}s ago (<${TRACK_SWEEP_MIN_INTERVAL_MS / 1000}s)`);
+    return;
+  }
+  lastTrackSweepTs = now;
+  if (trackRequestTimer) clearTimeout(trackRequestTimer);
+  trackRequestIndex = 0;
+  requestNextTrackName();
 }
 
 // Legacy single device variables (for backward compatibility)
@@ -179,9 +220,10 @@ let deviceIP = "127.0.0.1"; // Default to localhost for wired mode
 
 // M4L always runs on localhost
 const M4L_IP = "127.0.0.1";
-const M4L_PORT = 8001;  // Bridge → M4L default target port (back to 8001)
+const M4L_PORT = 8001;  // Bridge → M4L target port
 
 // Ableton connection tracking (module scope for API access)
+const ABLETON_IDLE_TIMEOUT_MS = 120000; // 2 minutes before marking Ableton disconnected
 let abletonConnected = false;
 let abletonGreetingSent = false; // Flag to ensure one-time message
 let lastHiTime = 0;
@@ -189,6 +231,7 @@ let lastHelloResponse = 0;
 let reannounceTimer = null; // debounce timer for /reannounce after device connects
 let expectedDeviceCount = 0; // target count from last scan
 let batchReannounceDone = false; // ensure single /reannounce per scan batch
+let lastActiveTrackIndex = null; // 0..31
 
 // Send OSC message to Ableton (M4L)
 function sendOSC(address, args = []) {
@@ -239,24 +282,25 @@ function initOSCListener() {
                 metadata: true
             });
             
-            // Simple handshake: send /hello, expect /hi back
-            // (variables are in module scope)
-            
-            // Function to check connection and send hello
+            // Simple handshake: send /hello once until we see /hi back
+            // After Ableton is confirmed connected, we avoid sending further /hello
+            // so that track updates are not interrupted.
             const checkConnection = () => {
-                // Send /hello
                 const now = Date.now();
                 const timeSinceLastHi = lastHiTime ? Math.floor((now - lastHiTime) / 1000) : null;
-                console.log(`>>> Handshake check... (last /hi: ${timeSinceLastHi ? timeSinceLastHi + 's ago' : 'never'})`);
-                sendOSC('/hello', []);
+
+                if (!abletonGreetingSent) {
+                    console.log(`>>> Handshake check... (last /hi: ${timeSinceLastHi ? timeSinceLastHi + 's ago' : 'never'})`);
+                    sendOSC('/hello', []);
+                } else {
+                    console.log(`>>> Handshake check (Ableton already connected; last /hi: ${timeSinceLastHi ? timeSinceLastHi + 's ago' : 'never'})`);
+                }
                 
-                // Check if we got /hi in last 30 seconds
-                if (lastHiTime && (now - lastHiTime < 30000)) {
+                // Check if we got /hi (or any track updates) within the idle timeout window
+                if (lastHiTime && (now - lastHiTime < ABLETON_IDLE_TIMEOUT_MS)) {
                     if (!abletonGreetingSent) {
                         console.log('✅ Ableton connection confirmed via /hi handshake');
-                        sendToAll(`ALERT "Ableton Connected!" 1000\n`);
-                        requestReannounce();
-                        abletonGreetingSent = true;
+                        abletonGreetingSent = true; // reannounce handled separately once devices + Ableton are ready
                     }
                     abletonConnected = true;
                     wsBroadcast({ type: 'ableton-connected' });
@@ -264,7 +308,8 @@ function initOSCListener() {
                     if (abletonConnected) {
                         abletonConnected = false;
                         abletonGreetingSent = false; // allow re-announce on next handshake
-                        console.log('⚠️ Ableton disconnected (no /hi in 30s)');
+                        const idleSecs = Math.floor(ABLETON_IDLE_TIMEOUT_MS / 1000);
+                        console.log(`⚠️ Ableton disconnected (no /hi in ${idleSecs}s)`);
                         wsBroadcast({ type: 'ableton-disconnected' });
                     }
                 }
@@ -276,8 +321,8 @@ function initOSCListener() {
                 checkConnection();
             }, 300);
             
-            // Then send /hello every 10 seconds
-            setInterval(checkConnection, 10000);
+            // Then send /hello every 20 seconds (reduce focus interruptions)
+            setInterval(checkConnection, 20000);
             
             // Log raw packets for debugging
             oscListener.on("raw", (data, info) => {
@@ -321,36 +366,56 @@ function initOSCListener() {
                     } catch (err) {}
                     
                     if (!wasConnected) {
-                        console.log('✓ Ableton CONNECTED');
-                        
-                        // Only request /reannounce automatically if at least one
-                        // TDS-8 device is connected. This avoids blasting track
-                        // names on first launch before any hardware is attached.
-                        const hasDevices = Array.isArray(devices) && devices.length > 0;
-                        if (hasDevices) {
-                            setTimeout(() => { requestReannounce(); }, 1000);
-                        } else {
-                            console.log('ℹ️ Skipping automatic /reannounce: no TDS-8 devices connected yet.');
-                        }
+                        console.log('✅ Ableton Live connected via OSC handshake');
+                        wsBroadcast({ type: 'ableton-connected' });
+                        // Mark greeting as sent so we stop sending /hello periodically
+                        abletonGreetingSent = true;
+                        // Now that Ableton is confirmed, see if we can safely trigger
+                        // a single /reannounce + track-name request batch.
+                        try { maybeReannounceBatch(); } catch {}
                     }
+                    return;
+                }
+
+                // If M4L sends /reannounce to the Bridge, treat it as a
+                // request to (re)pull all track names. We DO NOT echo
+                // /reannounce back to M4L here to avoid loops.
+                if (oscMsg.address === "/reannounce") {
+                    try {
+                      const now = Date.now();
+                      if (!lastReannounceTs || (now - lastReannounceTs) >= 2000) {
+                        lastReannounceTs = now;
+                        // Force a track-name sweep even if we ran one recently.
+                        setTimeout(() => { try { startTrackNameRequests(true); } catch {} }, 500);
+                      }
+                    } catch {}
                     return;
                 }
                 
                 // Forward OSC commands to device via serial
                 if (oscMsg.address === "/trackname" && oscMsg.args.length >= 2) { // Handle 2 or 3 args
-                    // If no serial connection is open yet, ignore quietly to avoid spam on boot
-                    const serialReady = (serial && serial.isOpen) || (devices && devices.length > 0);
-                    if (!serialReady) {
-                        // Silently ignore to prevent console spam on boot before devices are connected
-                        return;
-                    }
                     const displayIndex = oscMsg.args[0].value;
                     const nameRaw = oscMsg.args[1].value;
-                    // Handle both 2-arg (index, name) and 3-arg (index, name, actualTrack) messages
-                    const actualTrack = oscMsg.args.length >= 3 ? oscMsg.args[2].value : displayIndex;
-                    if (!Number.isFinite(actualTrack) || actualTrack < 0 || actualTrack >= 32) {
-                      return;
+                    const atRaw = oscMsg.args.length >= 3 ? Number(oscMsg.args[2].value) : NaN;
+                    let at;
+                    if (Number.isFinite(atRaw)) {
+                      if (atRaw >= 1 && atRaw <= 32) at = atRaw - 1; // normalize 1..32 → 0..31
+                      else if (atRaw >= 0 && atRaw < 32) at = atRaw;  // already 0..31
                     }
+                    if (!Number.isFinite(at)) {
+                      const di = Number(displayIndex);
+                      if (Number.isFinite(di)) {
+                        // If no 3rd arg, treat displayIndex as global index (0..31 or 1..32)
+                        if (di >= 1 && di <= 32) {
+                          at = di - 1; // treat as global 1..32
+                        } else if (di >= 0 && di < 32) {
+                          at = di;      // treat as global 0..31
+                        }
+                      }
+                    }
+                    if (!Number.isFinite(at) || at < 0 || at >= 32) return;
+
+                    // Do not override authoritative actualTrack from M4L.
 
                     // Sanitize name: strip outer quotes if present (M4L may include them), then escape inner quotes
                     let nameStr = String(nameRaw).trim();
@@ -359,34 +424,34 @@ function initOSCListener() {
                     }
                     const esc = nameStr.replace(/"/g, '\\"');
                     const escNorm = normalizeName(nameStr);
-                    const globalIndex = Number.isFinite(actualTrack) ? Number(actualTrack) : Number(displayIndex);
+                    const globalIndex = at;
                     if (!shouldForwardGlobal(globalIndex, escNorm)) {
                       console.log(`⏭️  Deduped global /trackname for track ${globalIndex}`);
                       return;
                     }
                     
-                    if (globalIndex >= 0 && globalIndex < 32) {
+                    if (Number.isFinite(at) && at >= 0 && at < 32) {
                       try { globalTrackNames[globalIndex] = nameStr; } catch {}
                     }
-                    // Multi-device: Route by display block so devices can mirror banks
-                    const block = Math.floor(actualTrack / 8);
-                    const localIndex = actualTrack % 8;
+                    const block = Math.floor(at / 8);
+                    const localIndex = at % 8;
+                    try { uiLog(`[ROUTE] /trackname di=${displayIndex} atRaw=${isNaN(atRaw)?'NaN':atRaw} → at=${at} block=${block} local=${localIndex}`); } catch {}
                     const matched = devices.filter(d => (typeof d.displayBlock === 'number' ? d.displayBlock : d.id) === block);
 
                     if (matched.length > 0) {
-                        const cmd = `/trackname ${localIndex} "${esc}" ${actualTrack}\n`;
+                        const cmd = `/trackname ${localIndex} "${esc}" ${at}\n`;
                         const delay = Math.max(0, (Number.isFinite(localIndex) ? localIndex : 0) * 100);
                         matched.forEach(d => {
                           if (shouldSendTrackname(d.id, localIndex, escNorm)) {
                             setTimeout(() => sendToDevice(d.id, cmd), delay);
-                            console.log(`📍 Routed track ${actualTrack} to Device ${d.id} (block ${block}, local ${localIndex}, delay ${delay}ms)`);
+                            console.log(`📍 Routed track ${at} to Device ${d.id} (block ${block}, local ${localIndex}, delay ${delay}ms)`);
                           }
                         });
                     } else if (devices.length > 0) {
                         // Fallback for single connected device if routing fails
                         const fallbackId = devices[0].id;        
                         if (shouldSendTrackname(fallbackId, localIndex, escNorm)) {
-                          const cmd = `/trackname ${localIndex} "${esc}" ${actualTrack}\n`;
+                          const cmd = `/trackname ${localIndex} "${esc}" ${at}\n`;
                           const delay = Math.max(0, (Number.isFinite(localIndex) ? localIndex : 0) * 100);
                           setTimeout(() => sendToDevice(fallbackId, cmd), delay);
                         } else {
@@ -396,7 +461,7 @@ function initOSCListener() {
                         // Single device mode (legacy)
                         if (serial && serial.isOpen) {
                             if (shouldSendTrackname(0, localIndex, escNorm)) {
-                              const cmd = `/trackname ${localIndex} "${esc}" ${actualTrack}\n`;
+                              const cmd = `/trackname ${localIndex} "${esc}" ${at}\n`;
                               const delay = Math.max(0, (Number.isFinite(localIndex) ? localIndex : 0) * 100);
                               setTimeout(() => send(cmd), delay);
                             } else {
@@ -412,6 +477,7 @@ function initOSCListener() {
                     if (!Number.isFinite(index) || index < 0 || index >= 32) {
                       return;
                     }
+                    lastActiveTrackIndex = index;
                     const block = Math.floor(index / 8);
                     const localIndex = index % 8;
                     if (devices && devices.length > 0) {
@@ -523,7 +589,7 @@ function getPythonCommand() {
 }
 
 app.post('/api/firmware/flash', async (req, res) => {
-  const { devicePath, firmwareUrl } = req.body;
+  const { devicePath, firmwareUrl, offset: offsetOverride, fullErase } = req.body;
   if (!devicePath || !firmwareUrl) {
     return res.status(400).json({ ok: false, error: 'Missing device path or firmware URL.' });
   }
@@ -541,7 +607,7 @@ app.post('/api/firmware/flash', async (req, res) => {
     }
     // Remove from our active list
     devices = devices.filter(d => d.path !== devicePath);
-    wsBroadcast({ type: 'serial-close', path: devicePath }); // Notify UI
+    wsBroadcast({ type: 'serial-close', path: devicePath });
     uiLog(`[FLASH] Port ${devicePath} is now free.`);
   } catch (e) {
     console.error(`[FLASH] Error closing port ${devicePath}:`, e);
@@ -562,11 +628,29 @@ app.post('/api/firmware/flash', async (req, res) => {
     return res.status(500).json({ ok: false, error: `Firmware download failed: ${e.message}` });
   }
 
-  // 3. Execute esptool.py
+  // 3. Execute esptool.py (write at detected/selected offset). Avoid full erase by default.
   const pythonCmd = getPythonCommand();
-  const esptoolCommand = `${pythonCmd} -m esptool --chip esp32c3 --port ${devicePath} --baud 115200 write_flash -z 0x0 "${tmpFile.name}"`;
-  uiLog(`[FLASH] Executing: ${esptoolCommand}`);
-  const child = exec(esptoolCommand);
+  let offset = '0x10000';
+  try {
+    const fname = new URL(firmwareUrl).pathname.split('/').pop().toLowerCase();
+    if (offsetOverride && (offsetOverride === '0x0' || offsetOverride === '0x10000')) {
+      offset = offsetOverride;
+    } else if (/factory|merged|all/.test(fname)) {
+      offset = '0x0';
+    } else if (/\.ino\.bin$/.test(fname)) {
+      offset = '0x10000';
+    } else if (/app|application|ota[-_]?app|no[-_]?boot/.test(fname)) {
+      offset = '0x10000';
+    }
+  } catch {}
+
+  const base = `${pythonCmd} -m esptool --chip esp32c3 --port ${devicePath} --baud 460800`;
+  const cmds = [];
+  if (fullErase) cmds.push(`${base} erase_flash`);
+  cmds.push(`${base} write_flash -z ${offset} "${tmpFile.name}"`);
+  const fullCmd = cmds.join(' && ');
+  uiLog(`[FLASH] Executing: ${fullCmd}`);
+  const child = exec(fullCmd, { windowsHide: true });
 
   child.stdout.on('data', (data) => {
     const output = data.toString();
@@ -581,7 +665,7 @@ app.post('/api/firmware/flash', async (req, res) => {
 
   child.on('close', (code) => {
     uiLog(`[FLASH] esptool.py process finished with exit code ${code}.`);
-    tmpFile.removeCallback(); // Clean up the temporary file
+    tmpFile.removeCallback();
 
     if (code === 0) {
       uiLog(`[FLASH] Firmware update successful! Device will reboot.`);
@@ -590,28 +674,50 @@ app.post('/api/firmware/flash', async (req, res) => {
       uiLog(`[FLASH] esptool.py failed. Please check the log.`);
       res.status(500).json({ ok: false, error: 'esptool.py failed. See log for details.' });
     }
-    // The frontend's periodic scan will pick up the device after it reboots.
   });
 });
 
 app.get('/api/firmware/releases', async (req, res) => {
+  const REPO = 'm1llipede/tds8';
+  const url = `https://api.github.com/repos/${REPO}/releases`;
+  const headers = {
+    'Accept': 'application/vnd.github+json',
+    'User-Agent': 'TDS8-Bridge'
+  };
   try {
-    const response = await axios.get('https://api.github.com/repos/m1llipede/tds8/releases');
-    const releases = response.data.map(release => {
-      return {
-        name: release.name,
-        tag_name: release.tag_name,
-        assets: release.assets.filter(asset => asset.name.endsWith('.bin')).map(asset => {
-          return {
-            name: asset.name,
-            browser_download_url: asset.browser_download_url
-          }
-        })
-      }
-    }).filter(release => release.assets.length > 0);
+    const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '';
+    const authHeaders = token ? { ...headers, Authorization: `Bearer ${token}` } : headers;
+    const response = await axios.get(url, { headers: authHeaders });
+    const releases = (response.data || []).map(release => ({
+      name: release.name,
+      tag_name: release.tag_name,
+      assets: (release.assets || [])
+        .filter(asset => asset.name && asset.name.endsWith('.bin'))
+        .map(asset => ({ name: asset.name, browser_download_url: asset.browser_download_url }))
+    })).filter(r => r.assets && r.assets.length > 0);
+
+    // Cache to disk for offline fallback
+    try {
+      const cacheDir = path.join(__dirname, 'cache');
+      const cachePath = path.join(cacheDir, 'firmware_releases.json');
+      fs.mkdirSync(cacheDir, { recursive: true });
+      fs.writeFileSync(cachePath, JSON.stringify({ ts: Date.now(), releases }, null, 2), 'utf8');
+    } catch {}
+
     res.json({ ok: true, releases });
   } catch (error) {
     console.error('Error fetching GitHub releases:', error.message);
+    // Fallback to cache if available
+    try {
+      const cachePath = path.join(__dirname, 'cache', 'firmware_releases.json');
+      if (fs.existsSync(cachePath)) {
+        const raw = fs.readFileSync(cachePath, 'utf8');
+        const j = JSON.parse(raw);
+        if (j && Array.isArray(j.releases)) {
+          return res.json({ ok: true, releases: j.releases, cached: true });
+        }
+      }
+    } catch {}
     res.status(500).json({ ok: false, error: 'Failed to fetch releases from GitHub' });
   }
 });
@@ -655,20 +761,33 @@ async function gracefulShutdown(reason) {
       }
     } catch {}
     try {
-      devices.forEach(d => {
-        try {
+      console.log('🔌 [SHUTDOWN] Clearing all TDS-8 serial ports...');
+      const closePromises = devices.map(d => {
+        return new Promise(resolve => {
           if (d.serial && d.serial.isOpen) {
-            d.serial.close();
+            d.serial.close((err) => {
+              if (err) console.error(`Error closing ${d.path}:`, err.message);
+              resolve();
+            });
+          } else {
+            resolve();
           }
-        } catch {}
+        });
       });
-      devices = [];
-    } catch {}
-    try {
+      // Also close legacy serial if open
       if (serial && serial.isOpen) {
-        serial.close();
+        closePromises.push(new Promise(resolve => {
+          serial.close(() => resolve());
+        }));
       }
-    } catch {}
+      
+      await Promise.all(closePromises);
+      devices = [];
+      serial = null;
+      console.log('✓ All serial ports closed.');
+    } catch (e) {
+      console.error('Error closing ports:', e.message);
+    }
     try {
       wss.clients.forEach(c => {
         try { c.close(); } catch {}
@@ -789,13 +908,25 @@ function maybeReannounceBatch() {
   try {
     const connectedCount = devices.length;
     if (batchReannounceDone) return;
-    // If we met or exceeded the expected count for this scan, announce immediately
-    if (expectedDeviceCount > 0 && connectedCount >= expectedDeviceCount) {
-      batchReannounceDone = true;
-      requestReannounce();
+
+    // Only auto-/reannounce when Ableton is actually connected (we've seen /hi)
+    if (!abletonConnected) {
+      console.log('ℹ️ Ableton not connected yet; deferring /reannounce until /hi handshake');
       return;
     }
-    // Fallback: on smaller setups or when some ports are cooling down, announce once
+
+    // If we know how many devices to expect, wait until they are all connected
+    if (expectedDeviceCount > 0) {
+      if (connectedCount >= expectedDeviceCount) {
+        batchReannounceDone = true;
+        requestReannounce();
+      } else {
+        console.log(`ℹ️ Waiting for all devices before /reannounce: ${connectedCount}/${expectedDeviceCount} connected`);
+      }
+      return;
+    }
+
+    // Fallback: when we don't know how many devices to expect, announce once
     // as soon as at least one device is connected. Use debounce to avoid duplicates.
     if (connectedCount >= 1) {
       batchReannounceDone = true;
@@ -809,12 +940,13 @@ function onSerialDataMulti(device, chunk) {
   try {
   const text = chunk.toString('utf8');
   device.buffer += text;
-  wsBroadcast({ type: 'serial-data', deviceId: device.id, data: text });
   let idx;
   while ((idx = device.buffer.indexOf('\n')) >= 0) {
     const line = device.buffer.slice(0, idx).trim();
     device.buffer = device.buffer.slice(idx + 1);
     if (line) {
+      // Send clean, line-based messages to the UI so they don't get split
+      wsBroadcast({ type: 'serial-data', deviceId: device.id, data: line });
       console.log(`RECV from Device ${device.id}: ${line}`);
       
       // Parse DEVICE_ID response
@@ -920,15 +1052,21 @@ app.get('/api/ports', async (_req, res) => {
     }
     console.log(`✓ Filtered to ${tds8Devices.length} TDS-8 device(s) after strict+heuristic filter`);
     
-    const decorated = tds8Devices.map(p => ({
-      path: p.path,
-      label: p.path,
-      vendorId: p.vendorId || '',
-      productId: p.productId || '',
-      serialNumber: p.serialNumber || '',
-      manufacturer: p.manufacturer || '',
-      pnpId: p.pnpId || ''
-    }));
+    const decorated = tds8Devices.map(p => {
+      const active = devices.find(d => d.path === p.path);
+      return {
+        path: p.path,
+        label: p.path,
+        vendorId: p.vendorId || '',
+        productId: p.productId || '',
+        serialNumber: p.serialNumber || '',
+        manufacturer: p.manufacturer || '',
+        pnpId: p.pnpId || '',
+        connected: !!active,
+        deviceId: active ? active.id : null,
+        trackRange: active ? `${active.id * 8 + 1}-${(active.id + 1) * 8}` : null
+      };
+    });
 
     res.json(decorated);
   } catch (e) {
@@ -1516,7 +1654,14 @@ app.post('/api/trackname', (req, res) => {
     }
     const esc = nameStr.replace(/"/g, '\\"');
     const escNorm = normalizeName(name);
-    const at = (actualTrack !== undefined) ? actualTrack : Number(index);
+    let atRaw = Number(actualTrack);
+    let at = Number.isFinite(atRaw) ? atRaw : Number(index);
+
+    // Treat actualTrack as a zero-based global index (0..31).
+    // If it's missing or out of range, fall back to the provided local index.
+    if (!Number.isFinite(at) || at < 0 || at >= 32) {
+      at = Number(index);
+    }
     const cmd = `/trackname ${index} "${esc}" ${at}\n`;
     // Global dedup: suppress duplicate track name updates for the same actual track
     if (!shouldForwardGlobal(Number(at), escNorm)) {
@@ -1749,7 +1894,9 @@ app.post('/api/osc-send', (req, res) => {
     if (!address) throw new Error('Missing OSC address');
     // Debounce /reannounce triggered from UI/API
     if (address === '/reannounce') {
-      requestReannounce();
+      // Force a full track-name sweep when the user explicitly clicks
+      // "Refresh from Ableton" in the UI, even if we ran one recently.
+      requestReannounce(true);
       return res.json({ ok: true, message: 'Debounced /reannounce' });
     }
     
@@ -2154,6 +2301,15 @@ async function autoConnectDevices() {
     console.error('❌ Auto-connect failed:', err.message);
   }
 }
+
+app.post('/api/restart', (req, res) => {
+  try { uiLog('Restart requested from dashboard'); } catch {}
+  res.json({ ok: true });
+  // Exit with code 0 (success), Electron will restart the process
+  setTimeout(() => {
+    process.exit(0);
+  }, 500);
+});
 
 app.post('/api/shutdown', (req, res) => {
   try { uiLog('Shutdown requested from dashboard'); } catch {}

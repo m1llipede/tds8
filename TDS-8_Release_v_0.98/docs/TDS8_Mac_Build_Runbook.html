@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>TDS-8 Bridge • macOS Build & Verification Runbook</title>
+<style>
+  :root{--ink:#0f172a;--muted:#475569;--brand:#ff8800;--bg:#ffffff}
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font:15px/1.5 ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial}
+  .wrap{max-width:980px;margin:40px auto;padding:0 20px}
+  h1{font-size:28px;margin:0 0 8px}
+  h2{font-size:20px;margin:24px 0 8px}
+  h3{font-size:16px;margin:18px 0 6px}
+  p{margin:10px 0}
+  .lead{color:var(--muted)}
+  .card{border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin:14px 0;background:#fff}
+  .btn{display:inline-block;padding:10px 14px;border-radius:10px;border:1px solid #e5e7eb;background:#fff;color:var(--ink);text-decoration:none;cursor:pointer}
+  .btn.primary{background:var(--brand);color:#fff;border-color:var(--brand)}
+  code{background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px;padding:2px 6px}
+  pre{background:#0b1020;color:#e6edf3;border-radius:10px;padding:12px;overflow:auto}
+  .muted{color:var(--muted)}
+  .list{margin:8px 0;padding-left:18px}
+  .header{display:flex;align-items:center;gap:12px;justify-content:space-between;margin-bottom:16px}
+  .print-hint{font-size:12px;color:var(--muted)}
+  @media print {.no-print{display:none}}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header no-print">
+      <div>
+        <h1>TDS-8 Bridge • macOS Build & Verification Runbook</h1>
+        <div class="lead">Single codebase. Windows EXE unchanged. macOS DMGs under Release/macOS.</div>
+      </div>
+      <button class="btn primary" onclick="window.print()">Print / Save as PDF</button>
+    </div>
+
+    <div class="card">
+      <h2>Context</h2>
+      <ul class="list">
+        <li>Single codebase lives at <code>TDS-8_Release_v_0.98</code>.</li>
+        <li>Windows EXE stays in release root. macOS DMGs go under <code>Release/macOS/</code>.</li>
+        <li>mac build targets and cross-platform cleanup are already added. Do not change Windows behavior.</li>
+      </ul>
+      <p class="muted">Rules: minimal edits, no architectural changes, start app after changes, progress updates every 10 minutes.</p>
+    </div>
+
+    <div class="card">
+      <h2>Mounting the Project on macOS</h2>
+      <h3>Option A: SMB Share</h3>
+      <pre>Mount: /Volumes/TDS8Release
+Project root: /Volumes/TDS8Release/TDS-8_Release_v_0.98</pre>
+      <h3>Option B: USB (exFAT)</h3>
+      <pre>Mount: /Volumes/TDS8USB
+Project root: /Volumes/TDS8USB/TDS-8_Release_v_0.98</pre>
+      <h3>Convenience variable</h3>
+      <pre>export PROJECT_ROOT="/Volumes/TDS8Release/TDS-8_Release_v_0.98"  # or USB path</pre>
+    </div>
+
+    <div class="card">
+      <h2>Prerequisites</h2>
+      <pre>xcode-select --install
+node -v   # 18+ recommended</pre>
+    </div>
+
+    <div class="card">
+      <h2>Build (macOS)</h2>
+      <pre>cd "$PROJECT_ROOT/resources/tds8-bridge"
+# IMPORTANT: run per-OS to ensure native deps
+npm ci
+
+# Apple Silicon
+npm run build:mac:arm64
+
+# Intel
+npm run build:mac:x64
+
+# Outputs
+# dist/macOS/TDS-8-Bridge-mac-arm64.dmg
+# dist/macOS/TDS-8-Bridge-mac-x64.dmg</pre>
+    </div>
+
+    <div class="card">
+      <h2>Place Artifacts in Release</h2>
+      <pre>mkdir -p "$PROJECT_ROOT/macOS"
+cp "$PROJECT_ROOT/resources/tds8-bridge/dist/macOS/"*.dmg "$PROJECT_ROOT/macOS/"</pre>
+    </div>
+
+    <div class="card">
+      <h2>Quick Launcher (mac)</h2>
+      <pre># one-time (if needed)
+chmod +x "$PROJECT_ROOT/Start_TDS8_Bridge.command"
+# run by double-click or:
+bash "$PROJECT_ROOT/Start_TDS8_Bridge.command"</pre>
+    </div>
+
+    <div class="card">
+      <h2>Start & Verify</h2>
+      <ul class="list">
+        <li>Install app from DMG to Applications; then <code>open -a "TDS-8-Bridge"</code>.</li>
+        <li>Open UI: <code>open "http://localhost:8088"</code>.</li>
+      </ul>
+      <h3>Checklist</h3>
+      <ul class="list">
+        <li>Header bar height fixed. Logo scaled 2× via transform without growing the bar.</li>
+        <li>Clear Ports disconnects & rescans devices.</li>
+        <li>Dropdown remapping updates live; mirroring works; persistence per device.</li>
+        <li>Manual names persist across /hi and restarts (localStorage).</li>
+        <li>Refresh from Ableton overwrites all 32 names and persists them.</li>
+        <li>Save Current Track Names writes 32 names server-side.</li>
+        <li>Load Saved Track Names loads all 32 and persists to localStorage.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Health Checks</h2>
+      <pre># Port 8088
+lsof -i tcp:8088
+
+# Track names now
+curl -s http://127.0.0.1:8088/api/tracknames | jq .
+
+# After Refresh from Ableton, re-check
+curl -s http://127.0.0.1:8088/api/tracknames | jq .</pre>
+    </div>
+
+    <div class="card">
+      <h2>Constraints & Safety</h2>
+      <ul class="list">
+        <li>Do not alter Windows scripts or EXE location.</li>
+        <li>Keep mac DMGs under <code>$PROJECT_ROOT/macOS/</code>.</li>
+        <li>Only make mac-specific fixes if build fails; keep changes minimal; relaunch app to test.</li>
+        <li>On shared media (SMB/USB), always run <code>npm ci</code> before mac builds. Windows will run <code>npm ci</code> before its builds.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Troubleshooting</h2>
+      <ul class="list">
+        <li>Unsigned dev builds are fine; ignore notarization prompts for now.</li>
+        <li>If UI doesn’t load immediately, wait 2–3s and refresh; Electron retries are present.</li>
+        <li>If lsof not available, <code>netstat -anp tcp | grep 8088</code> and kill via Activity Monitor or <code>pkill</code>.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Deliverables to Report</h2>
+      <ul class="list">
+        <li>Paths of produced DMGs.</li>
+        <li>Confirmation of UI at <code>http://localhost:8088</code>.</li>
+        <li>Checklist results: manual name persistence across /hi; refresh overwrites 32; load/save 32; ports & remapping OK.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Begin Now</h2>
+      <ol class="list">
+        <li>Confirm <code>$PROJECT_ROOT</code> is mounted.</li>
+        <li>Run <code>npm ci</code> and both mac builds.</li>
+        <li>Copy DMGs into <code>$PROJECT_ROOT/macOS/</code>.</li>
+        <li>Launch app and verify the checklist.</li>
+        <li>Report findings; include any minimal fixes (file + lines).</li>
+      </ol>
+      <p class="print-hint no-print">Tip: Click “Print / Save as PDF” above to generate a PDF copy of this runbook.</p>
+    </div>
+  </div>
+</body>
+</html>

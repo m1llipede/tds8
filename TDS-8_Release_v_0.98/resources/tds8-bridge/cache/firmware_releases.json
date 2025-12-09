@@ -1,0 +1,25 @@
+{
+  "ts": 1765291642359,
+  "releases": [
+    {
+      "name": "TDS-8 Firmware v0.98",
+      "tag_name": "v0.98",
+      "assets": [
+        {
+          "name": "TDS-8_Firmware_0.98.ino.bin",
+          "browser_download_url": "https://github.com/m1llipede/tds8/releases/download/v0.98/TDS-8_Firmware_0.98.ino.bin"
+        }
+      ]
+    },
+    {
+      "name": "TDS-8_Diagnostic",
+      "tag_name": "TDS-8_Diagnostic",
+      "assets": [
+        {
+          "name": "OLED_Diagnostic.ino.bin",
+          "browser_download_url": "https://github.com/m1llipede/tds8/releases/download/TDS-8_Diagnostic/OLED_Diagnostic.ino.bin"
+        }
+      ]
+    }
+  ]
+}

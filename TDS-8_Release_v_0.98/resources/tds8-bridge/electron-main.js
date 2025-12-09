@@ -11,6 +11,20 @@ let tray = null;
 let bridgeProcess = null;
 const BRIDGE_PORT = 8088;
 
+// Ensure single-instance behavior: additional launches just focus the existing window
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
 // Helper for delays
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -21,34 +35,70 @@ async function cleanStartup() {
 
   return new Promise(async (resolve) => {
     try {
-      // 1. Kill other TDS-8 Bridge.exe instances (excluding self)
-      // /FI "PID ne myPid" filters out the current process
-      const killAppCmd = `taskkill /F /IM "TDS-8-Bridge.exe" /FI "PID ne ${myPid}"`;
-      exec(killAppCmd, (err) => {
-        // Ignore errors (e.g., if no other process exists)
-        if (!err) console.log('[Startup] Killed other Bridge instances.');
-      });
-      
-      await wait(500);
+      if (process.platform === 'win32') {
+        // Kill other Bridge instances by executable name
+        const exeName = path.basename(process.execPath || 'TDS-8 Bridge.exe');
+        const candidates = Array.from(new Set([
+          exeName,
+          'TDS-8 Bridge.exe',   // common packaged name
+          'TDS-8-Bridge.exe'    // legacy/alternate name
+        ]));
 
-      // 2. Kill anything on Port 8088 (Node backend)
-      // Find PID on port 8088
-      exec(`netstat -aon | findstr :${BRIDGE_PORT}`, (err, stdout) => {
-        if (stdout) {
-          const lines = stdout.split('\n');
-          lines.forEach(line => {
-            const parts = line.trim().split(/\s+/);
-            if (parts.length >= 5) {
-              const pid = parts[4];
-              // Don't kill self if for some reason we are on that port (unlikely at this stage)
-              if (parseInt(pid) !== myPid && parseInt(pid) > 0) {
-                console.log(`[Startup] Killing PID ${pid} on port ${BRIDGE_PORT}`);
-                exec(`taskkill /F /PID ${pid}`);
-              }
-            }
-          });
+        for (const name of candidates) {
+          const killAppCmd = `taskkill /F /IM "${name}" /FI "PID ne ${myPid}"`;
+          await new Promise(resolve => exec(killAppCmd, () => {
+            console.log(`[Startup] Attempted to kill other Bridge instances named ${name}.`);
+            resolve();
+          }));
         }
-      });
+        
+        await wait(500);
+        
+        // Kill any process using port 8088
+        await new Promise(resolve => {
+          exec(`netstat -aon | findstr :${BRIDGE_PORT}`, (err, stdout) => {
+            if (stdout && stdout.trim()) {
+              const lines = stdout.split('\n');
+              lines.forEach(line => {
+                const parts = line.trim().split(/\s+/);
+                if (parts.length >= 5) {
+                  const pid = parts[4];
+                  if (parseInt(pid) !== myPid && parseInt(pid) > 0) {
+                    console.log(`[Startup] Killing PID ${pid} on port ${BRIDGE_PORT}`);
+                    exec(`taskkill /F /PID ${pid}`, () => {});
+                  }
+                }
+              });
+            }
+            resolve();
+          });
+        });
+      } else {
+        // Kill by process name (macOS/Linux)
+        const killCmd = `pkill -f "TDS-8-Bridge" || true`;
+        await new Promise(resolve => exec(killCmd, () => {
+          console.log('[Startup] Killed other Bridge instances by name.');
+          resolve();
+        }));
+        
+        await wait(500);
+        
+        // Kill any process using port 8088
+        await new Promise(resolve => {
+          exec(`lsof -ti tcp:${BRIDGE_PORT}`, (err, stdout) => {
+            if (stdout && stdout.trim()) {
+              stdout.trim().split(/\s+/).forEach(pidStr => {
+                const n = parseInt(pidStr, 10);
+                if (n && n !== myPid) {
+                  console.log(`[Startup] Killing PID ${n} on port ${BRIDGE_PORT}`);
+                  exec(`kill -9 ${n}`, () => {});
+                }
+              });
+            }
+            resolve();
+          });
+        });
+      }
 
       await wait(2000); // Wait 2 seconds for OS to release ports/handles
       console.log('[Startup] Cleanup complete.');
@@ -120,8 +170,8 @@ function createWindow() {
     });
   };
   
-  // Start first attempt after 2 seconds (giving Node time to boot)
-  setTimeout(tryLoadURL, 2000);
+  // Start first attempt after 5 seconds (giving Node time to fully boot and initialize)
+  setTimeout(tryLoadURL, 5000);
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();

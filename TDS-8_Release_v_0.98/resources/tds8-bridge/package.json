@@ -9,7 +9,9 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "build:win": "electron-builder --win portable"
+    "build:win": "electron-builder --win portable",
+    "build:mac:arm64": "electron-builder --mac dmg zip --arm64",
+    "build:mac:x64": "electron-builder --mac dmg zip --x64"
   },
   "dependencies": {
     "@serialport/bindings-cpp": "^12.0.0",
@@ -38,6 +40,10 @@
     "win": {
       "target": ["portable"],
       "artifactName": "TDS-8-Bridge.exe"
+    },
+    "mac": {
+      "target": ["dmg", "zip"],
+      "artifactName": "macOS/TDS-8-Bridge-mac-${arch}.${ext}"
     }
   }
 }

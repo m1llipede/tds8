@@ -11,6 +11,8 @@
 body{margin:0;background:var(--bg);font:14px/1.3 system-ui,Segoe UI,Roboto;color:var(--text);overflow:auto}
 .wrap{max-width:100%;min-height:100vh;display:flex;flex-direction:column;padding:12px}
 .main-grid{display:grid;grid-template-columns:1fr 380px;gap:12px;flex:1;min-height:0}
+.main-grid.serial-hidden{grid-template-columns:1fr}
+.right-col.hidden{display:none}
 .left-col{display:flex;flex-direction:column;gap:12px;overflow-y:auto}
 .right-col{display:flex;flex-direction:column;min-height:0}
 .card{background:var(--card);border-radius:10px;box-shadow:0 4px 12px rgba(0,0,0,.06);overflow:hidden}
@@ -37,19 +39,20 @@ select.input{cursor:pointer}
 .btn.ghost.active{background:var(--brand);color:#fff;border-color:var(--brand)}
 .btn.sm{padding:6px 10px;font-size:12px}
 .btn-group{display:flex;gap:8px;flex-wrap:wrap}
-.device-list{display:flex;flex-direction:column;gap:6px}
-.device-item{background:#f3f4f6;border:2px solid #d1d5db;border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;transition:all .2s;opacity:0.6}
+.device-list{display:flex;flex-direction:column;gap:4px}
+.device-item{background:#f3f4f6;border:2px solid #d1d5db;border-radius:8px;padding:6px 10px;display:flex;justify-content:space-between;align-items:center;transition:all .2s;opacity:0.6}
 .device-item:hover{border-color:var(--brand);background:#fff;opacity:1}
 .device-item.connected{border-color:var(--brand);background:#fff8f0;opacity:1}
 .device-name{font-weight:600;font-size:14px;color:var(--text)}
 .device-status{font-size:11px;color:#10b981;margin-top:2px}
-.trackgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:4px;max-height:650px;overflow-y:scroll;padding-right:8px}
+.trackgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:3px;max-height:520px;overflow-y:scroll;padding-right:8px}
 .trackrow{display:flex;gap:6px;align-items:center}
 .trackrow label{margin:0;min-width:60px;font-weight:600;font-size:12px;color:var(--text)}
 .trackrow .input{padding:5px 8px;font-size:12px}
 .track-sep{grid-column:1 / -1;height:6px;border-radius:6px;margin:6px 0;background:linear-gradient(90deg,#ff8800 0%, #8a2be2 100%);opacity:0.3}
 .serial-card{max-height:calc(100vh - 140px);display:flex;flex-direction:column}
 .serial-card .body.flex{flex:1;min-height:0;display:flex;flex-direction:column}
+.serial-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:10px}
 .icon-card{text-align:center;padding:20px 16px;cursor:pointer;transition:all .2s;border-radius:8px;border:2px solid transparent}
 .icon-card:hover{background:var(--hover);border-color:#e3e6ef;transform:translateY(-1px)}
 .icon-card .icon{font-size:36px;margin-bottom:8px}
@@ -80,6 +83,14 @@ select.input{cursor:pointer}
 </style>
 </head>
 <body>
+  <div id="startupOverlay" style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55);z-index:2000">
+    <div id="startupOverlayBox" style="background:#0b132b;color:#fff;border:2px solid #1f2937;border-radius:12px;padding:18px 22px;font-size:15px;box-shadow:0 10px 30px rgba(0,0,0,.35);max-width:420px;text-align:center">
+      <div style="font-weight:600;margin-bottom:8px">Connecting to the TDS-8 System…</div>
+      <div id="startupOverlayStatus" style="font-size:13px;opacity:0.9;display:flex;flex-direction:column;gap:2px;align-items:center;justify-content:center">
+        <div>Starting TDS-8 Bridge backend…</div>
+      </div>
+    </div>
+  </div>
   <div class="wrap" style="display:block;" id="mainApp">
     <!-- Connection Status Banner (hidden; controls moved below Serial Monitor) -->
     <div id="connectionBanner" style="display:none"></div>
@@ -88,13 +99,13 @@ select.input{cursor:pointer}
       <!-- Left Column -->
       <div class="left-col">
         
-        <!-- Devices -->
+        <!-- Devices + Track Names -->
         <div class="card">
-          <div class="hdr" style="position:relative;padding:4px 16px;height:184px;overflow:hidden;">
-            <img src="assets/Playoptix Logo-white-transparent.png" alt="Playoptix" style="position:absolute;left:12px;top:10px;height:26px;opacity:0.95"/>
-            <img src="assets/icon-white.png" alt="TDS-8" style="height:176px;display:block;margin:0 auto;transform:scale(2);transform-origin:center center;"/>
+          <div class="hdr" style="position:relative;padding:4px 16px;height:170px;overflow:hidden;display:flex;align-items:center;justify-content:center;">
+            <img src="assets/icon-white.png" alt="TDS-8" style="height:180px;display:block;margin:0 auto;transform:scale(1.6);transform-origin:center center;"/>
+            <button id="btnSerialToggleTop" class="btn sm ghost" style="position:absolute;top:10px;right:10px;padding:4px 10px;font-size:11px;background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2)">Hide Serial Monitor</button>
           </div>
-          <div class="body">
+          <div class="body" style="display:flex;flex-direction:column;gap:10px;min-height:0;max-height:800px;overflow-y:auto;">
             <div id="deviceList" class="device-list">
               <div style="padding:8px 12px;background:#d1ecf1;border:2px solid #0c5460;border-radius:6px;margin-bottom:8px;font-size:11px;color:#0c5460">
                 <strong>💡 Manual Connect Mode</strong><br>
@@ -104,28 +115,24 @@ select.input{cursor:pointer}
                 Click Refresh to scan for devices
               </div>
             </div>
-            
-          </div>
-        </div>
 
-        <!-- Track Names -->
-        <div class="card">
-          <div class="hdr" style="display:flex;align-items:center;gap:10px">
-            <h1 style="margin:0">Track Names</h1>
-            <div class="btn-group" id="trackBtnGroup" style="margin-left:auto">
-              <button id="btnRefresh" class="btn primary">Refresh from Ableton</button>
-              <button id="btnSendAll" class="btn ghost sm">Update Custom Track Names</button>
-              <button id="btnResetTracks" class="btn ghost sm">Reset Custom Track Names</button>
-              <button id="btnSaveTracks" class="btn secondary sm">Save Current Track Names</button>
-              <button id="btnReadTracks" class="btn secondary sm">Load Saved Track Names</button>
+            <div class="divider"></div>
+
+            <!-- Global Track Names controls and grid -->
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <h1 style="margin:0;font-size:14px;white-space:nowrap">Track Names</h1>
+              <div class="btn-group" id="trackBtnGroup" style="margin-left:auto;flex-wrap:wrap;gap:6px">
+                <button id="btnRefresh" class="btn primary sm">Refresh from Ableton</button>
+                <button id="btnResetTracks" class="btn ghost sm">Reset &amp; Update Track Names</button>
+                <button id="btnSaveTracks" class="btn secondary sm">Save Current Track Names</button>
+                <button id="btnReadTracks" class="btn secondary sm">Load Saved Track Names</button>
+              </div>
             </div>
-          </div>
-          <div class="body" style="display:flex;flex-direction:column;min-height:0;max-height:500px;overflow-y:auto;">
+
             <!-- Offset Controls (hidden for now) -->
             <div style="display:none"></div>
-            
-            <div class="trackgrid" id="tracks" style="overflow-y:auto;max-height:320px;"></div>
-            <div class="divider"></div>
+
+            <div class="trackgrid" id="tracks" style="overflow-y:auto;max-height:520px;"></div>
           </div>
         </div>
 
@@ -137,7 +144,7 @@ select.input{cursor:pointer}
           <div class="hdr" style="display:flex;align-items:center">
             <h1 style="margin:0">Serial Monitor</h1>
             <div style="display:flex;align-items:center;gap:10px;margin-left:auto">
-              <span style="font-size:11px;color:#fff;opacity:0.9">v120125-01</span>
+              <span style="font-size:11px;color:#fff;opacity:0.9">v120825-04</span>
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
                 <input type="checkbox" id="autoScroll" checked style="cursor:pointer"/>
                 Auto-scroll
@@ -146,12 +153,18 @@ select.input{cursor:pointer}
           </div>
           <div class="body flex">
             <div id="log" class="log"></div>
-            <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:space-between">
-              <div class="btn-group" style="gap:6px">
-                <button id="qaRebootAll" class="btn sm ghost" title="Reboot all devices">Reboot All</button>
-                <button id="btnClearPorts" class="btn sm ghost" style="color:#dc2626;border-color:#fecaca;background:#fef2f2" title="Disconnect all devices and clear ports">Clear Ports</button>
-              </div>
+            <div class="serial-actions" style="margin-top:10px">
+              <button id="qaRebootAll" class="btn sm ghost" title="Reboot all devices">Reboot All</button>
+              <button id="btnClearPorts" class="btn sm ghost" style="color:#dc2626;border-color:#fecaca;background:#fef2f2" title="Disconnect all devices and clear ports">Clear Ports</button>
+              <button id="btnRestartBridge" class="btn sm ghost" style="background:#fff;border:2px solid #f59e0b;color:#b45309" title="Restart the Bridge backend">Restart Bridge</button>
               <button class="btn sm ghost" style="background:#fff;border:2px solid #ef4444;color:#b91c1c" onclick="quitBridge()">Quit Bridge</button>
+            </div>
+            <div style="margin-top:6px; display:flex; justify-content:space-between; align-items:center; font-size:10px; color:#9ca3af;">
+              <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+                <input type="checkbox" id="logVerboseToggle" style="cursor:pointer;">
+                Verbose log
+              </label>
+              <button id="btnClearLog" class="btn sm ghost" title="Clear serial log" style="padding:2px 6px;font-size:10px;line-height:1;min-width:auto">✕</button>
             </div>
             <!-- Compact Connection Controls (moved here) -->
             <div style="margin-top:12px">
@@ -172,7 +185,7 @@ select.input{cursor:pointer}
             <!-- Firmware Update (below Serial Monitor) -->
             <div style="margin-top:10px">
               <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:8px">Firmware Update</div>
-              <div class="grid" style="grid-template-columns:1fr; gap:8px; align-items:stretch">
+              <div class="grid" style="grid-template-columns:1fr 1fr; gap:8px; align-items:stretch">
                 <div>
                   <label for="fwUrl">Firmware Release / Asset</label>
                   <select id="fwUrl" class="input" title="Select a firmware asset (.bin) from GitHub releases">
@@ -195,13 +208,17 @@ select.input{cursor:pointer}
       </div>
 
     </div>
-    
+
+    <div class="footer-info">
+      <div class="company">
+        <span style="display:inline-block;padding:4px 12px;border-radius:999px;background:#0b132b">
+          <img src="assets/Playoptix Logo-white-transparent.png" alt="Playoptix" style="height:18px;vertical-align:middle"/>
+        </span>
       </div>
-    <!-- Connection Status Banner (hidden; controls moved below Serial Monitor) -->
-    <div id="connectionBanner" style="display:none"></div>
-    
-    
-    
+      <div class="serial">TDS-8 Bridge UI v120925-04</div>
+      <div style="margin-top:4px; font-size:10px; color:#9ca3af;">© 2025 Playoptix. All rights reserved.</div>
+    </div>
+
     <!-- Wi-Fi Modal (legacy - removed) -->
 
   <!-- Add Network Modal -->
@@ -242,6 +259,20 @@ window.fetch = (input, init) => {
   } catch { return _origFetch(input, init); }
 };
 
+async function restartBridge() {
+  try {
+    log('🔄 Restarting Bridge backend...', 'info');
+    await fetch('/api/restart', { method: 'POST' });
+    // Wait a moment for the backend to restart
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Try to reconnect
+    location.reload();
+  } catch (e) {
+    log('❌ Restart Bridge failed: ' + e.message, 'err');
+    console.error('Restart Bridge failed', e);
+  }
+}
+
 async function quitBridge() {
   try {
     await fetch('/api/shutdown', { method: 'POST' });
@@ -257,6 +288,8 @@ async function healthCheck() {
     if (res.ok) {
       bridgeHealthy = true;
       if (banner) { banner.style.display = 'none'; banner.textContent = ''; }
+      setStartupStatus('TDS-8 Bridge backend is running. Waiting for devices and Ableton…');
+      maybeHideOverlay();
       return true;
     }
     throw new Error('HTTP ' + res.status);
@@ -273,6 +306,7 @@ async function healthCheck() {
       banner.style.fontSize = '12px';
       banner.innerHTML = '⚠️ TDS-8 Bridge not detected on this computer. Please start the TDS-8 Bridge app, then refresh.';
     }
+    setStartupStatus('Waiting for TDS-8 Bridge backend to respond…');
     return false;
   }
 }
@@ -282,6 +316,7 @@ setInterval(() => { healthCheck(); }, 5000);
 const $ = s => document.querySelector(s);
 const logEl = $('#log');
 let autoScrollEnabled = true;
+let verboseLogging = false;
 const autoScrollCb = $('#autoScroll');
 if (autoScrollCb) {
   autoScrollEnabled = !!autoScrollCb.checked;
@@ -310,6 +345,47 @@ let deviceIdMap = new Map(); // Map serial numbers to device IDs for persistence
 let isM4LConnected = false;
 let firmwareReleases = []; // Cache for GitHub releases
 let bridgeHealthy = false;
+let overlayVisible = false;
+
+function setStartupStatus(msg) {
+  const statusEl = document.getElementById('startupOverlayStatus');
+  if (!statusEl) return;
+  const text = String(msg == null ? '' : msg).trim();
+  if (!text) {
+    statusEl.innerHTML = '';
+    return;
+  }
+  // Split into lines (roughly per sentence) so each line is centered
+  // and displayed as its own row in the overlay.
+  const parts = text.split(/(?<=\.)\s+/); // split after periods
+  statusEl.innerHTML = '';
+  parts.forEach(part => {
+    const line = part.trim();
+    if (!line) return;
+    const div = document.createElement('div');
+    div.textContent = line;
+    statusEl.appendChild(div);
+  });
+}
+
+function showOverlay() {
+  const el = document.getElementById('startupOverlay');
+  if (el) {
+    el.style.display = 'flex';
+    overlayVisible = true;
+    setStartupStatus('Starting TDS-8 Bridge backend…');
+  }
+}
+function hideOverlay() {
+  const el = document.getElementById('startupOverlay');
+  if (el) { el.style.display = 'none'; overlayVisible = false; }
+}
+function maybeHideOverlay() {
+  if (!bridgeHealthy) return;
+  // Once the backend is confirmed healthy, always allow the user into the UI
+  // even if no devices or Ableton are connected yet.
+  hideOverlay();
+}
 
 // Sanitize names for UI display: remove wrapping quotes if present
 function stripOuterQuotes(s) {
@@ -324,7 +400,7 @@ function updateM4LStatus(isConnected) {
   // Update all visible device items
   document.querySelectorAll('.m4l-status').forEach(el => {
     el.innerHTML = isConnected
-      ? `<span style="color:#10b981;">🎵 M4L Connected</span>`
+      ? `<span style="color:#10b981;">M4L Connected</span>`
       : `<span style="color:#ef4444;">⚠️ M4L Disconnected</span>`;
   });
 }
@@ -406,6 +482,25 @@ function updateConnectionStatus(connected) {
   }
 }
 
+function withPreservedTrackFocus(fn) {
+  try {
+    const ae = document.activeElement;
+    const id = ae && ae.id ? ae.id : null;
+    const s = (ae && typeof ae.selectionStart === 'number') ? ae.selectionStart : null;
+    const e = (ae && typeof ae.selectionEnd === 'number') ? ae.selectionEnd : null;
+    fn();
+    if (id && id.startsWith('tname')) {
+      const el = document.getElementById(id);
+      if (el) {
+        el.focus();
+        if (s !== null && e !== null) {
+          try { el.setSelectionRange(s, e); } catch {}
+        }
+      }
+    }
+  } catch { fn(); }
+}
+
 // ----- Device Management -----
 async function scanDevices() {
   try {
@@ -426,6 +521,16 @@ async function scanDevices() {
     }
   
   ports.forEach((p, idx) => {
+    // Sync UI with backend state if backend says connected but UI doesn't know
+    if (p.connected && !connectedDevices.has(p.path)) {
+       connectedDevices.set(p.path, {
+         deviceId: p.deviceId,
+         trackRange: p.trackRange
+       });
+       // Also persist the ID mapping
+       if (p.serialNumber) deviceIdMap.set(p.serialNumber, p.deviceId);
+    }
+
     const item = document.createElement('div');
     item.className = 'device-item';
     const isConnected = connectedDevices.has(p.path);
@@ -448,8 +553,8 @@ async function scanDevices() {
     const trackInfo = deviceInfo ? ` - Tracks ${deviceInfo.trackRange}` : '';
     
     const statusText = isConnected 
-      ? `<div class="device-status">✓ Connected via ${currentConnectionType === 'wifi' ? 'WiFi' : 'USB'} - ${deviceIdLabel}${trackInfo}</div>` 
-      : `<div style="font-size:11px;color:#6b7280;margin-top:2px">⚪ Disconnected</div>`;
+      ? `<span class="device-status">TDS-8 Connected</span>` 
+      : `<span class="device-status" style="color:#6b7280">TDS-8 Disconnected</span>`;
     
     // Create device item HTML
     const currentDevId = (isConnected && deviceInfo) ? deviceInfo.deviceId : null;
@@ -470,14 +575,14 @@ async function scanDevices() {
     ).join('');
     
     item.innerHTML = `
-      <div style="display:flex;flex-direction:column;flex:1;gap:8px;">
-        <div style="display:flex;align-items:center;gap:12px;">
-          <div style="flex:1;">
+      <div style="display:flex;flex-direction:column;flex:1;gap:6px;">
+        <div style="display:flex;align-items:center;gap:12px;justify-content:space-between;">
+          <div style="flex:1;min-width:0;">
             <div class="device-name">${displayName}${versionBadge}</div>
-            ${statusText}
-            <div class="m4l-status" style="font-size:11px;margin-top:2px">${isM4LConnected ? '<span style="color:#10b981;">🎵 M4L Connected</span>' : '<span style="color:#ef4444;">⚠️ M4L Disconnected</span>'}</div>
+            <div class="m4l-status" style="font-size:11px;margin-top:2px">${isM4LConnected ? '<span style="color:#10b981;">M4L Connected</span>' : '<span style="color:#ef4444;">⚠️ M4L Disconnected</span>'}</div>
           </div>
-          <div style="display:flex;align-items:center;gap:8px">
+          <div style="display:flex;align-items:center;gap:6px;white-space:nowrap;">
+            ${statusText}
             <select class="input sm" style="width:140px;font-size:11px;padding:4px 6px" data-path="${p.path}" onchange="onTrackRangeChange(this, '${p.path}')">
               ${deviceIdOptions}
             </select>
@@ -778,7 +883,7 @@ function loadLocalTrackNames() {
   } catch { return false; }
 }
 
-function resetTracks() {
+async function resetTracks() {
   const numDevices = Math.max(1, connectedDevices.size);
   const totalTracks = Math.min(numDevices * 8, 32);
   
@@ -794,6 +899,19 @@ function resetTracks() {
   try { localStorage.removeItem('tds8_tracknames'); } catch {}
   
   log(`✓ Cleared all track names`, 'info');
+  // Also clear any active-track highlight by asking M4L to switch
+  // to a non-existent track index (handled as "none" in the patch).
+  try {
+    await fetch('/api/osc-send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address: '/activetrack', args: [99] })
+    });
+  } catch (e) {
+    console.error('Failed to send /activetrack 99:', e);
+  }
+
+  await sendAllTracks();
 };
 
 async function saveTracksToBridge() {
@@ -976,16 +1094,27 @@ async function refreshFromAbleton() {
   } catch (err) {
     log(`✗ Error: ${err.message}`, 'err');
   }
-  setTimeout(fetchTrackNames, 400);
+  setTimeout(fetchTrackNames, 5000);
 }
 
 // ---- WebSocket: stream logs and state from Bridge ----
 function initWebSocket() {
   try {
     const ws = new WebSocket(`ws://127.0.0.1:8088`);
-    ws.onopen = () => { log('✓ WebSocket connected to Bridge', 'info'); };
-    ws.onclose = () => { log('✗ WebSocket disconnected from Bridge', 'err'); };
-    ws.onerror = () => { log('✗ WebSocket error', 'err'); };
+    ws.onopen = () => {
+      log('✓ WebSocket connected to Bridge', 'info');
+      setStartupStatus('Connected to Bridge UI. Scanning for devices and Ableton…');
+    };
+    ws.onclose = () => {
+      log('✗ WebSocket disconnected from Bridge', 'err');
+      setStartupStatus('Lost connection to Bridge. Waiting to reconnect…');
+      // Clear M4L status when Bridge disconnects
+      updateM4LStatus(false);
+    };
+    ws.onerror = () => {
+      log('✗ WebSocket error', 'err');
+      setStartupStatus('Error talking to Bridge. Check that the app is running.');
+    };
     ws.onmessage = (evt) => {
       let msg;
       try { msg = JSON.parse(evt.data); } catch { return; }
@@ -993,32 +1122,90 @@ function initWebSocket() {
       switch (msg.type) {
         case 'device-connected':
           log(`🔌 Auto-connected: ${msg.path} → Device ${msg.deviceId + 1} (Tracks ${msg.trackRange})`, 'info');
+          setStartupStatus(`Connected to TDS-8 Device ${msg.deviceId + 1} (${msg.trackRange}). Waiting for Ableton…`);
           connectedDevices.set(msg.path, { 
             name: `TDS-8 #${msg.deviceId + 1}`,
             path: msg.path, 
             deviceId: msg.deviceId, 
             trackRange: msg.trackRange 
           });
+          if (!currentDevice) currentDevice = msg.path;
           scanDevices();
           buildTrackGrid();
+          maybeHideOverlay();
           break;
-        case 'serial-data':
-          if (msg.data) log(String(msg.data));
+        case 'serial-data': {
+          if (!msg.data) break;
+          const text = String(msg.data);
+          const devIdxFromMsg = (typeof msg.deviceId === 'number') ? msg.deviceId : null;
+
+          if (!verboseLogging) {
+            // 1) Device SENT lines (backend uiLog)
+            const mDev = text.match(/^\[Device\s+(\d+)\]\s+SENT:\s*(.+)$/);
+            if (mDev) {
+              const devIdx = parseInt(mDev[1], 10);
+              const cmd = mDev[2];
+              log(`SENT to Device#${devIdx + 1}: ${cmd}`, 'out');
+              break;
+            }
+            // 2) Legacy serial SENT lines
+            const mSer = text.match(/^\[SERIAL\]\s+SENT:\s*(.+)$/);
+            if (mSer) {
+              log(`SENT to Device(serial): ${mSer[1]}`, 'out');
+              break;
+            }
+            // 3) OK: acknowledgements from devices
+            // Hide bare 'OK:' lines, and only show ones that include details
+            if (/^OK:\s*$/.test(text)) break;
+            const mOk = text.match(/^OK:\s*(.+)$/);
+            if (mOk) {
+              const suffix = mOk[1];
+              const devLabel = devIdxFromMsg !== null ? `Device#${devIdxFromMsg + 1}` : 'Device';
+              log(`RECEIVED from ${devLabel}: ${suffix}`, 'in');
+              break;
+            }
+            // 4) Legacy 'Received:' prefix from single-serial path
+            const mRecv = text.match(/^Received:\s*(.+)$/);
+            if (mRecv) {
+              const suffix = mRecv[1];
+              const devLabel = devIdxFromMsg !== null ? `Device#${devIdxFromMsg + 1}` : 'Device';
+              log(`RECEIVED from ${devLabel}: ${suffix}`, 'in');
+              break;
+            }
+            // 5) Hide noisy debug lines in simple mode
+            if (/^\[(ROUTE|FLASH|esptool|FATAL)\]/.test(text)) break;
+          }
+
+          // Fallback: show raw line
+          log(text, 'info');
           break;
+        }
         case 'osc-sent': {
           const a = msg.address || '';
-          const args = Array.isArray(msg.args) ? msg.args.map(x => x.value ?? x).join(', ') : (msg.argsStr || '');
-          log(`OSC → ${a}${args ? ' [' + args + ']' : ''}`, 'out');
+          const arr = Array.isArray(msg.args) ? msg.args.map(x => x.value ?? x) : [];
+          if (verboseLogging) {
+            const argsStr = arr.length ? ' [' + arr.join(', ') + ']' : '';
+            log(`OSC → ${a}${argsStr}`, 'out');
+          } else {
+            const payload = [a].concat(arr).join(' ').trim();
+            log(`SENT to M4L: ${payload}`, 'out');
+          }
           break;
         }
         case 'osc-received': {
           const a = msg.address || '';
-          const args = Array.isArray(msg.args) ? msg.args.map(x => x.value ?? x).join(', ') : '';
+          const arr = Array.isArray(msg.args) ? msg.args.map(x => x.value ?? x) : [];
           if (msg.address === '/trackname' && connectedDevices.size === 0) {
-              // Silently ignore to prevent log spam on startup
+            // Silently ignore to prevent log spam on startup
+          } else {
+            if (verboseLogging) {
+              const argsStr = arr.length ? ' [' + arr.join(', ') + ']' : '';
+              log(`OSC ← ${a}${argsStr}`, 'in');
             } else {
-              log(`OSC ← ${a}${args ? ' [' + args + ']' : ''}`, 'in');
+              const payload = [a].concat(arr).join(' ').trim();
+              log(`RECEIVED from M4L: ${payload}`, 'in');
             }
+          }
           break;
         }
         case 'device-ip': {
@@ -1043,11 +1230,17 @@ function initWebSocket() {
         case 'serial-open':
         case 'serial-close':
         case 'serial-error':
-          scanDevices();
+          withPreservedTrackFocus(() => { scanDevices(); });
+          if (msg.type === 'serial-open') {
+            setStartupStatus('Serial port opened. Initializing TDS-8 devices…');
+          }
+          maybeHideOverlay();
           break;
         case 'ableton-connected':
           updateM4LStatus(true);
           log('✓ Ableton connected (heartbeat /hi)', 'out');
+          setStartupStatus('Ableton connected. Requesting track names…');
+          maybeHideOverlay();
           // Kick off backend auto-connect sweep so devices attach without manual clicks
           fetch('/api/connect-all', { method: 'POST' }).catch(err => console.error('connect-all failed:', err));
           setTimeout(async () => {
@@ -1067,18 +1260,26 @@ function initWebSocket() {
                     trackRange
                   });
                 });
-                scanDevices();
-                buildTrackGrid();
-                buildFirmwareDeviceSelect();
+                withPreservedTrackFocus(() => {
+                  scanDevices();
+                  buildTrackGrid();
+                  buildFirmwareDeviceSelect();
+                });
               }
             } catch (err) {
               console.error('osc-status failed:', err);
             }
           }, 2000);
+          // Once Ableton is connected and the backend has requested track names,
+          // pull them into the UI automatically on first launch. Give the
+          // backend extra time to finish its /reannounce + /request-trackname
+          // sweep before reading from /api/tracknames.
+          setTimeout(() => { try { fetchTrackNames(); } catch (e) {} }, 9000);
           break;
         case 'ableton-disconnected':
           updateM4LStatus(false);
           log('⚠️ Ableton disconnected (no /hi)', 'err');
+          setStartupStatus('Ableton disconnected. Waiting for /hi from M4L…');
           break;
       }
     };
@@ -1347,21 +1548,24 @@ function sendCommand() {
 function buildFirmwareDeviceSelect() {
   const sel = document.getElementById('fwDeviceSelect');
   if (!sel) return;
+  const prev = sel.value;
   sel.innerHTML = '';
   const frag = document.createDocumentFragment();
-  const any = document.createElement('option');
-  any.value = 'auto';
-  any.textContent = connectedDevices.size > 0 ? 'Auto (first connected)' : 'No devices connected';
-  frag.appendChild(any);
   if (connectedDevices.size > 0) {
     Array.from(connectedDevices.entries()).forEach(([path, info]) => {
       const opt = document.createElement('option');
-      opt.value = 'id:' + info.deviceId;
-      opt.textContent = `Device ${info.deviceId + 1} • ${path}`;
+      opt.value = path; // use actual COM path for flashing
+      opt.textContent = `${info.name || (`Device ${info.deviceId + 1}`)} • ${path}`;
       frag.appendChild(opt);
     });
+  } else {
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = 'No devices connected';
+    frag.appendChild(none);
   }
   sel.appendChild(frag);
+  if (prev) sel.value = prev;
   const btn = document.getElementById('btnFlash');
   if (btn) btn.disabled = connectedDevices.size === 0;
 }
@@ -1394,7 +1598,7 @@ async function flashFirmware() {
       btn.textContent = 'Flashing…';
     }
 
-    log('⬇️ Downloading firmware and flashing device…', 'info');
+    log(`⬇️ Downloading firmware and flashing device…`, 'info');
     const res = await fetch('/api/firmware/flash', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1613,6 +1817,7 @@ async function checkDeviceStatus() {
 
 // ----- Init -----
 window.addEventListener('DOMContentLoaded', () => {
+  showOverlay();
   fetchFirmwareReleases(); // Fetch releases as soon as the page is ready
 
   $('#deviceList').addEventListener('click', async (e) => {
@@ -1641,7 +1846,7 @@ window.addEventListener('DOMContentLoaded', () => {
         const res = await fetch('/api/firmware/flash', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ path, url })
+          body: JSON.stringify({ devicePath: path, firmwareUrl: url })
         });
 
         const result = await res.json();
@@ -1742,18 +1947,75 @@ window.addEventListener('DOMContentLoaded', () => {
     };
   }
 
-  const btnSendAll = document.getElementById('btnSendAll');
-  if (btnSendAll) btnSendAll.onclick = sendAllTracks;
-
   const btnResetTracks = document.getElementById('btnResetTracks');
   if (btnResetTracks) {
-    btnResetTracks.textContent = 'Reset Custom Track Names';
+    btnResetTracks.textContent = 'Reset & Update Track Names';
     btnResetTracks.onclick = resetTracks;
   }
 
   const btnSaveTracks = document.getElementById('btnSaveTracks');
   if (btnSaveTracks) {
     btnSaveTracks.onclick = saveTracksToBridge;
+  }
+
+  // Restart Bridge button
+  const btnRestartBridge = document.getElementById('btnRestartBridge');
+  if (btnRestartBridge) {
+    btnRestartBridge.onclick = restartBridge;
+  }
+
+  // Serial Monitor toggles (header + top-level)
+  const toggleSerialBtn = document.getElementById('toggleSerialMonitor');
+  const toggleSerialTop = document.getElementById('btnSerialToggleTop');
+  const rightCol = document.querySelector('.right-col');
+  const mainGrid = document.querySelector('.main-grid');
+
+  function setSerialVisible(visible) {
+    if (!rightCol || !mainGrid) return;
+
+    if (visible) {
+      rightCol.classList.remove('hidden');
+      mainGrid.classList.remove('serial-hidden');
+    } else {
+      rightCol.classList.add('hidden');
+      mainGrid.classList.add('serial-hidden');
+    }
+
+    if (toggleSerialBtn) {
+      toggleSerialBtn.textContent = visible ? 'Hide' : 'Show';
+      toggleSerialBtn.title = visible ? 'Hide Serial Monitor' : 'Show Serial Monitor';
+    }
+    if (toggleSerialTop) {
+      toggleSerialTop.textContent = visible ? 'Hide Serial Monitor' : 'Show Serial Monitor';
+      toggleSerialTop.title = visible ? 'Hide Serial Monitor' : 'Show Serial Monitor';
+    }
+
+    try {
+      localStorage.setItem('serialMonitorVisible', visible ? 'true' : 'false');
+    } catch (e) {}
+  }
+
+  const storedSerial = (() => {
+    try { return localStorage.getItem('serialMonitorVisible'); } catch (e) { return null; }
+  })();
+  // Default to hidden unless the user explicitly turned it on before
+  const initialSerialVisible = storedSerial === 'true';
+  setSerialVisible(initialSerialVisible);
+
+  const getSerialVisible = () => {
+    return rightCol && !rightCol.classList.contains('hidden');
+  };
+
+  if (toggleSerialBtn) {
+    toggleSerialBtn.onclick = () => {
+      setSerialVisible(!getSerialVisible());
+    };
+  }
+
+  if (toggleSerialTop) {
+    toggleSerialTop.onclick = () => {
+      setSerialVisible(!getSerialVisible());
+    };
   }
 
   // WiFi buttons (legacy handlers removed)
@@ -1962,6 +2224,27 @@ window.addEventListener('DOMContentLoaded', () => {
 
   const qaVersionAll = document.getElementById('qaVersionAll');
   if (qaVersionAll) qaVersionAll.onclick = () => apiSend('VERSION ALL');
+
+  const btnClearLog = document.getElementById('btnClearLog');
+  if (btnClearLog && logEl) {
+    btnClearLog.onclick = () => {
+      logEl.innerHTML = '';
+    };
+  }
+
+  const logVerboseToggle = document.getElementById('logVerboseToggle');
+  if (logVerboseToggle) {
+    try {
+      const storedVerbose = localStorage.getItem('tds8_log_verbose');
+      verboseLogging = storedVerbose === 'true';
+      logVerboseToggle.checked = verboseLogging;
+    } catch (e) {}
+
+    logVerboseToggle.addEventListener('change', (e) => {
+      verboseLogging = !!e.target.checked;
+      try { localStorage.setItem('tds8_log_verbose', verboseLogging ? 'true' : 'false'); } catch (err) {}
+    });
+  }
 
   const btnClearPorts = document.getElementById('btnClearPorts');
   if (btnClearPorts) {
