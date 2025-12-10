@@ -1,28 +1,49 @@
 #!/bin/bash
-set -euo pipefail
 
-# TDS-8 Bridge quick launcher for macOS
-# - Closes any existing instances
-# - Launches the app from /Applications
-# - Opens the dashboard in your browser
+# =========================================================
+# TDS-8 Bridge: MacOS Launcher
+# - Kills any stuck Bridge or Node processes
+# - Force-clears ports 8088, 9001, 8003
+# - Starts the application
+# =========================================================
 
-echo "[INFO] Closing any existing TDS-8 Bridge..."
-pkill -f "TDS-8-Bridge" >/dev/null 2>&1 || true
-sleep 0.5
+echo "[TDS-8] Cleaning up environment..."
 
-APP_NAME="TDS-8-Bridge"
+# --- KILL EXISTING PROCESSES ---
+pkill -f "TDS-8 Bridge" 2>/dev/null
+pkill -f "node" 2>/dev/null
+pkill -f "electron" 2>/dev/null
 
-echo "[INFO] Launching ${APP_NAME}..."
-if ! open -a "${APP_NAME}" ; then
-  echo "[WARN] ${APP_NAME} not found in /Applications."
-  echo "[HINT] If you opened the DMG, drag ${APP_NAME}.app into Applications first, then run this again."
-  exit 1
+# --- FORCE CLEAR PORTS ---
+# Find and kill process on port 8088
+lsof -ti:8088 | xargs kill -9 2>/dev/null
+# Find and kill process on port 9001
+lsof -ti:9001 | xargs kill -9 2>/dev/null
+# Find and kill process on port 8003
+lsof -ti:8003 | xargs kill -9 2>/dev/null
+
+# --- LAUNCH APPLICATION ---
+echo "[TDS-8] Starting Bridge..."
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Check if the app exists in the current folder, otherwise just try opening
+if [ -d "$DIR/TDS-8 Bridge.app" ]; then
+    open "$DIR/TDS-8 Bridge.app"
+else
+    # Fallback: maybe they are running from source or different structure
+    echo "Could not find 'TDS-8 Bridge.app' in this folder."
+    echo "Trying generic open..."
+    # If it's a built app, it might be named differently. 
+    # Let's try to find any .app starting with TDS-8
+    APP_PATH=$(find "$DIR" -maxdepth 1 -name "TDS-8*.app" | head -n 1)
+    if [ -n "$APP_PATH" ]; then
+        open "$APP_PATH"
+    else
+        echo "Error: Could not find TDS-8 application to launch."
+        read -p "Press any key to exit..."
+    fi
 fi
 
-# Give the bridge time to boot the local server
-sleep 2
-
-# Open the dashboard
-open "http://localhost:8088"
-
-echo "[SUCCESS] ${APP_NAME} started. This window can be closed."
+# --- EXIT TERMINAL ---
+# This closes the terminal window
+osascript -e 'tell application "Terminal" to close first window' & exit

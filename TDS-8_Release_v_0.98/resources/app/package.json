@@ -1,0 +1,49 @@
+{
+  "name": "tds8-bridge",
+  "version": "0.4.1",
+  "description": "Web-based bridge for TDS-8 (ESP32-C3): USB serial relay + browser UI + OSC integration",
+  "main": "electron-main.js",
+  "bin": {
+    "tds8-bridge": "index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "build:win": "electron-builder --win portable",
+    "build:mac:arm64": "electron-builder --mac dmg zip --arm64",
+    "build:mac:x64": "electron-builder --mac dmg zip --x64"
+  },
+  "dependencies": {
+    "@serialport/bindings-cpp": "^12.0.0",
+    "@serialport/list": "^12.0.0",
+    "@serialport/stream": "^12.0.0",
+    "axios": "^1.13.2",
+    "express": "^4.19.2",
+    "morgan": "^1.10.0",
+    "osc": "^2.4.5",
+    "tmp": "^0.2.5",
+    "ws": "^8.17.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1",
+    "electron": "28.3.3",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.playoptix.tds8bridge",
+    "productName": "TDS-8-Bridge",
+    "asar": true,
+    "files": [
+      "**/*",
+      "!node_modules/electron"
+    ],
+    "win": {
+      "target": ["portable"],
+      "artifactName": "TDS-8-Bridge.exe"
+    },
+    "mac": {
+      "target": ["dmg", "zip"],
+      "artifactName": "macOS/TDS-8-Bridge-mac-${arch}.${ext}"
+    }
+  }
+}
